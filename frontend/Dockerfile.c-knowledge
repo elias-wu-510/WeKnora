@@ -1,0 +1,11 @@
+# C-Knowledge 专用前端镜像：在官方 UI 镜像上叠加“以 base=/c-knowledge/ 构建”的 dist。
+# 目的：让 SPA 在 https://llm-ai.c-smart.hk/c-knowledge/ 路径前缀下工作，
+# 同时不影响现有 8081 上以 base=/ 构建的官方镜像。
+#
+# 构建（在 /home/claw/WeKnora/frontend 下）：
+#   npm run build -- --base=/c-knowledge/ --outDir dist-c-knowledge
+#   docker build -f Dockerfile.c-knowledge -t weknora-ui:c-knowledge .
+FROM wechatopenai/weknora-ui:v0.8.2
+COPY dist-c-knowledge/ /usr/share/nginx/html/
+# goal round 11: 保留外層 nginx 的 X-Forwarded-Proto（供 OIDC https 回跳）
+COPY api-proxy.conf /etc/nginx/api-proxy.conf
