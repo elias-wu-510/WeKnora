@@ -852,7 +852,9 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 // @Security     ApiKeyAuth
 // @Router       /knowledge-search [post]
 func (h *Handler) SearchKnowledge(c *gin.Context) {
-	ctx := logger.CloneContext(c.Request.Context())
+	// Retrieval belongs to this HTTP request; keep its cancellation and deadline
+	// so a disconnected client does not leave embedding work running.
+	ctx := c.Request.Context()
 	logger.Info(ctx, "Start processing knowledge search request")
 
 	// Parse request body
