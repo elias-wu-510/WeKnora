@@ -1582,9 +1582,11 @@
               <label>{{ $t('agent.editor.webSearchProvider') }}</label>
               <p class="desc">{{ $t('agentEditor.desc.webSearchProvider') }}</p>
             </div>
-            <div class="setting-control">
+            <div class="setting-control web-search-control">
               <t-select v-model="formData.config.web_search_provider_id" clearable
-                :placeholder="$t('agent.editor.webSearchProviderPlaceholder')" style="width: 240px;">
+                :disabled="webSearchProviderList.length === 0"
+                :placeholder="$t('agent.editor.webSearchProviderPlaceholder')"
+                style="width: 240px;">
                 <t-option v-for="p in webSearchProviderList" :key="p.id" :value="p.id" :label="p.name">
                   <span>{{ p.name }}</span>
                   <t-tag v-if="p.is_default" theme="primary" size="small" style="margin-left: 6px;">{{
@@ -1592,6 +1594,15 @@
                     }}</t-tag>
                 </t-option>
               </t-select>
+              <div v-if="webSearchProviderList.length === 0" class="web-search-setup">
+                <span>{{ $t('webSearchSettings.noProvidersDesc') }}</span>
+                <a v-if="authStore.hasRole('admin')" :href="webSearchSettingsHref" target="_blank" rel="noopener noreferrer">
+                  {{ $t('webSearchSettings.addProvider') }}
+                </a>
+                <t-button variant="text" size="small" :loading="refreshingWebSearchProviders" @click="refreshWebSearchProviders">
+                  {{ $t('common.refresh') }}
+                </t-button>
+              </div>
             </div>
           </div>
 
@@ -2088,7 +2099,20 @@ const mcpOptions = computed<McpSelectOption[]>(() => {
 const showMcpServiceSelect = computed(() =>
   mcpOptions.value.length > 0 || (formData.value.config.mcp_services?.length ?? 0) > 0,
 );
-const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
+const webSearchProviderList = computed(() => chatResources.webSearchProviders as WebSearchProviderEntity[]);
+const webSearchSettingsHref = computed(() => router.resolve({
+  path: '/platform/settings', query: { section: 'websearch' },
+}).href);
+const refreshingWebSearchProviders = ref(false);
+
+async function refreshWebSearchProviders() {
+  refreshingWebSearchProviders.value = true;
+  try {
+    await chatResources.ensureWebSearchProviders(true);
+  } finally {
+    refreshingWebSearchProviders.value = false;
+  }
+}
 const skillCatalog = ref<SkillCatalogItem[]>([]);
 const catalogReady = ref(false);
 const installingCatalogId = ref('');
@@ -4006,8 +4030,6 @@ const loadDependencies = async () => {
 
     storageEngineStatus.value = editorResources.storageStatus;
 
-    webSearchProviderList.value = chatResources.webSearchProviders as WebSearchProviderEntity[];
-
     if (editorResources.placeholders) {
       placeholderData.value = editorResources.placeholders;
     }
@@ -5275,6 +5297,25 @@ const handleSave = async () => {
   justify-content: flex-end;
   align-items: flex-start;
   overflow: hidden;
+
+  &.web-search-control {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+
+    .web-search-setup {
+      width: 240px;
+      max-width: 100%;
+      color: var(--td-text-color-secondary);
+      font-size: var(--app-text-sm);
+      line-height: 1.5;
+
+      a {
+        margin-right: 8px;
+        color: var(--td-brand-color);
+      }
+    }
+  }
 
   .reasoning-effort-select {
     width: 100%;

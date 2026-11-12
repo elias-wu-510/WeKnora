@@ -17,6 +17,43 @@ import (
 
 var regThinkTags = regexp.MustCompile(`(?s)<think>.*?</think>`)
 
+// BuildCommitID is injected by the production build so retrieval traces can be
+// matched to the source revision that produced them.
+var BuildCommitID = "unknown"
+
+const traceabilityCandidateLogLimit = 20
+
+func logTraceabilityCandidates(
+	ctx context.Context,
+	chatManage *types.ChatManage,
+	phase string,
+	results []*types.SearchResult,
+) {
+	if chatManage == nil {
+		return
+	}
+	candidates := make([]map[string]interface{}, 0, min(len(results), traceabilityCandidateLogLimit))
+	for i, result := range results {
+		if i >= traceabilityCandidateLogLimit {
+			break
+		}
+		if result == nil {
+			continue
+		}
+		candidates = append(candidates, map[string]interface{}{
+			"rank":     i + 1,
+			"chunk_id": result.ID,
+			"score":    result.Score,
+		})
+	}
+	pipelineInfo(ctx, "Traceability", phase, map[string]interface{}{
+		"session_id": chatManage.SessionID,
+		"query":      strings.TrimSpace(chatManage.RewriteQuery),
+		"commit_id":  BuildCommitID,
+		"candidates": candidates,
+	})
+}
+
 // pipelineInfo logs pipeline info level entries.
 func pipelineInfo(ctx context.Context, stage, action string, fields map[string]interface{}) {
 	common.PipelineInfo(ctx, stage, action, fields)

@@ -131,6 +131,28 @@ func (t *handleTable[M]) size() int {
 	return len(t.entryByHandle)
 }
 
+// snapshotEntry is one handle together with its durable value and metadata.
+type snapshotEntry[M any] struct {
+	handle string
+	value  string
+	meta   M
+}
+
+// entries returns a handle/value/metadata snapshot for callers that must search
+// candidate sources, such as citation re-attribution.
+func (t *handleTable[M]) entries() []snapshotEntry[M] {
+	if t == nil {
+		return nil
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	out := make([]snapshotEntry[M], 0, len(t.entryByHandle))
+	for handle, entry := range t.entryByHandle {
+		out = append(out, snapshotEntry[M]{handle: handle, value: entry.value, meta: entry.meta})
+	}
+	return out
+}
+
 // pairs returns a value/handle snapshot for text codecs. Callers own ordering
 // (e.g. longest-value-first for substring compaction).
 func (t *handleTable[M]) pairs() []handlePair {

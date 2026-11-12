@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -18,6 +19,87 @@ import (
 // path. Without it a caller-supplied MatchCount scales the vector-store query
 // depth without limit.
 const maxRetrievalPoolSize = 500
+
+// tagFilterDimension extracts the dimension prefix from a KB tag name.
+// Controlled tags are named "<dimension>:<value>" (e.g. "機構:BD"), so the
+// prefix groups the values of one facet. Tags without a separator form their
+// own single-value dimension and keep the historical exact-tag semantics.
+func tagFilterDimension(name string) string {
+	for _, sep := range []string{":", "："} {
+		if idx := strings.Index(name, sep); idx > 0 {
+			return name[:idx]
+		}
+	}
+	return name
+}
+
+// resolveTagFilterKnowledgeIDs turns a caller-supplied tag filter into the set
+// of knowledge IDs it selects. Semantics match how the facets are meant to be
+// used: values of the same dimension are OR-ed ("BD or LD"), while distinct
+// dimensions are AND-ed ("BD" AND "revision"). Chunk-level tag_id filtering in
+// the vector store cannot express that — embeddings.tag_id is never populated
+// for document KBs — so the filter is resolved to knowledge IDs before
+// retrieval. An empty result means "nothing matches" and must not degrade into
+// "search everything".
+func (s *knowledgeBaseService) resolveTagFilterKnowledgeIDs(
+	ctx context.Context,
+	tenantID uint64,
+	kbIDs []string,
+	tagIDs []string,
+) ([]string, error) {
+	if len(tagIDs) == 0 {
+		return nil, nil
+	}
+	tags, err := s.tagRepo.GetByIDs(ctx, tenantID, tagIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(tags) == 0 {
+		return nil, nil
+	}
+	dimensions := make([]string, 0, len(tags))
+	byDimension := make(map[string][]string, len(tags))
+	for _, tag := range tags {
+		dim := tagFilterDimension(tag.Name)
+		if _, seen := byDimension[dim]; !seen {
+			dimensions = append(dimensions, dim)
+		}
+		byDimension[dim] = append(byDimension[dim], tag.ID)
+	}
+
+	seen := make(map[string]struct{})
+	result := make([]string, 0)
+	for _, kbID := range kbIDs {
+		var selected map[string]struct{}
+		for i, dim := range dimensions {
+			ids, listErr := s.kgRepo.ListIDsByTagIDs(ctx, tenantID, kbID, byDimension[dim])
+			if listErr != nil {
+				return nil, listErr
+			}
+			current := make(map[string]struct{}, len(ids))
+			for _, id := range ids {
+				current[id] = struct{}{}
+			}
+			if i == 0 {
+				selected = current
+				continue
+			}
+			for id := range selected {
+				if _, ok := current[id]; !ok {
+					delete(selected, id)
+				}
+			}
+		}
+		for id := range selected {
+			if _, dup := seen[id]; dup {
+				continue
+			}
+			seen[id] = struct{}{}
+			result = append(result, id)
+		}
+	}
+	return result, nil
+}
 
 // GetQueryEmbedding computes the query embedding using the embedding model
 // associated with the given knowledge base. Callers can pre-compute and reuse
@@ -185,6 +267,43 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	kb := pickPrimary(kbs, id)
 	if kb == nil {
 		return nil, apperrors.NewNotFoundError("knowledge base not found")
+	}
+
+	// Resolve KB-level tag filters into knowledge IDs before retrieval. The
+	// vector store's own tag_id predicate is dead weight for document KBs
+	// (embeddings.tag_id is never populated; the bindings live in
+	// knowledge_tag_relations), so filtering there silently returned nothing.
+	// FAQ KBs keep the chunk-level predicate, which is what their tags index.
+	if len(params.TagIDs) > 0 && kb.Type != types.KnowledgeBaseTypeFAQ {
+		resolved, tagErr := s.resolveTagFilterKnowledgeIDs(
+			ctx, kb.TenantID, searchKBIDs, params.TagIDs)
+		if tagErr != nil {
+			logger.ErrorWithFields(ctx, tagErr, map[string]interface{}{
+				"knowledge_base_ids": searchKBIDs,
+				"tag_ids":            params.TagIDs,
+			})
+			return nil, tagErr
+		}
+		if len(params.KnowledgeIDs) > 0 {
+			allowed := make(map[string]struct{}, len(resolved))
+			for _, id := range resolved {
+				allowed[id] = struct{}{}
+			}
+			kept := make([]string, 0, len(params.KnowledgeIDs))
+			for _, id := range params.KnowledgeIDs {
+				if _, ok := allowed[id]; ok {
+					kept = append(kept, id)
+				}
+			}
+			params.KnowledgeIDs = kept
+		} else {
+			params.KnowledgeIDs = resolved
+		}
+		params.TagIDs = nil
+		if len(params.KnowledgeIDs) == 0 {
+			logger.Infof(ctx, "Tag filter matched no knowledge in KBs %v", searchKBIDs)
+			return nil, nil
+		}
 	}
 
 	// Over-retrieval (existing rule, preserved): 5x per-KB matchCount,

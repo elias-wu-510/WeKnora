@@ -1,0 +1,13 @@
+# 檢索調優上線（2026-10-26）：把 app 服務指到自建映像
+#   鏡像內容 = wechatopenai/weknora-app:v0.8.2 + 用 WeKnora-retrieval-tuning 源碼重編的 /app/WeKnora
+#   回滾 = 刪掉本檔（-f 只帶 docker-compose.yml）後 `docker compose up -d --no-deps app`
+#
+# 2026-10-26/27：重切塊期間曾在此注入 BATCH_EMBED_SIZE=2 / CONCURRENCY_POOL_SIZE=1 限流
+#   （bge-m3 @ siliconflow 實測約 50 萬 TPM / 1000 RPM；預設 batch 5 + pool 5 會 65 秒 TPM 429）
+#   15 份文檔已全部重切完成，2026-10-27 13:3x 已移除這兩行、恢復原生並發。
+# 2026-10-27 16:3x：P0 預檢實測 4,300 頁規格庫 5,995 塊在 pool=5 下必撞 TPM 429（整篇回滾 0 塊），
+#   按拍板重新注入限流；187 篇全量入庫期間保持，跑完再移除並 `up -d --no-deps app`。
+# 2026-10-31：合并句柄修复（成员覆盖实测数字时不再保留空父块；识别紧贴右括号的数字脚注）
+services:
+  app:
+    image: weknora-app:traceability-20261031-merged-handle-member9

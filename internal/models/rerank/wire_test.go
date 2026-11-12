@@ -222,6 +222,12 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 			wantBody: cohere("bge-reranker-v2-m3", three, nil),
 		},
 		{
+			name: "generic on DashScope flat reranks endpoint", provider: "generic", model: "qwen3-rerank",
+			base:     "/compatible-api/v1/reranks",
+			wantPath: "/compatible-api/v1/reranks", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: cohere("qwen3-rerank", three, nil),
+		},
+		{
 			name: "novita", provider: "novita", model: "baai/bge-reranker-v2-m3", base: "/openai/v1",
 			wantPath: "/openai/v1/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
 			wantBody: cohere("baai/bge-reranker-v2-m3", three, nil),

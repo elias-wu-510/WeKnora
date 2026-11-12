@@ -9,16 +9,23 @@ server:
 conversation:
   max_rounds: 5
   keyword_threshold: 0.3
-  embedding_top_k: 30
+  embedding_top_k: 50
   vector_threshold: 0.2
-  rerank_threshold: 0.3
-  rerank_top_k: 30
+  rerank_threshold: 0.05
+  rerank_top_k: 10
   fallback_strategy: "model"
   fallback_response: "Sorry, I am unable to answer this question."
   fallback_prompt_id: "default_fallback_prompt"  # from prompt_templates/fallback.yaml (mode: "model")
   enable_rewrite: true
+  # 檢索查詢翻譯（2026-10-26 上線）：非英文提問在檢索/重排前先翻成技術英文，
+  # 解決英文語料（HKHA General Specification）中文提問取不到數值的問題。
+  # 模型 = deepseek-v4.1-flash-1017（remote）。留空 = 關閉本階段。
+  # 回滾 = 刪掉這一行，然後 docker compose restart app。
+  query_translate_model_id: "7e6a4d0b-7db4-4439-b073-090636a4e76d"
   enable_query_expansion: true
   enable_rerank: true
+  # 2026-10-28 實測：把 50 個候選交給 cross-encoder 收斂到 10（原本空 model_id 導致整段 rerank 被跳過）
+  rerank_model_id: "e1a8f816-7817-4cb5-9503-f2d58a1082f6"
   rewrite_prompt_id: "default_rewrite"  # from prompt_templates/rewrite.yaml (content + user fields)
   generate_summary_prompt_id: "default_summary"  # from prompt_templates/generate_summary.yaml
   generate_kb_description_prompt_id: "default_kb_description"  # from prompt_templates/generate_kb_description.yaml
@@ -29,7 +36,14 @@ conversation:
     max_input_chars: 8192
     repeat_penalty: 1.0
     temperature: 0.3
-    max_completion_tokens: 1024
+    # Raised 1024 -> 8192 (2026-10-27): deepseek-v4.1-flash spends reasoning
+    # tokens before emitting text, so a 1024 budget produced empty answers
+    # ("hit the model's per-response output limit before any text was
+    # produced") on every clause-level question.
+    max_completion_tokens: 8192
+    # 2026-10-29: dashscope deepseek streams reasoning tokens first; without an
+    # explicit off switch TTFT stays ~10s. Try disabling thinking for QA.
+    thinking: false
     no_match_prefix: |-
       <think>
       </think>

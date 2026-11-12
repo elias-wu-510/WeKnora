@@ -52,12 +52,14 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		pipelineInfo(ctx, "Rerank", "skip", map[string]interface{}{
 			"reason": "empty_search_result",
 		})
+		logTraceabilityCandidates(ctx, chatManage, "post_rerank", nil)
 		return next()
 	}
 	if chatManage.RerankModelID == "" {
 		pipelineWarn(ctx, "Rerank", "skip", map[string]interface{}{
 			"reason": "empty_model_id",
 		})
+		logTraceabilityCandidates(ctx, chatManage, "post_rerank_skipped", chatManage.SearchResult)
 		return next()
 	}
 
@@ -135,6 +137,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 				"candidate_cnt": len(candidatesToRerank),
 			})
 			chatManage.SearchResult = candidatesToRerank
+			logTraceabilityCandidates(ctx, chatManage, "post_rerank_fallback", chatManage.SearchResult)
 			spanOutput = map[string]interface{}{
 				"stage":           "api_error_fallback",
 				"candidate_count": len(candidatesToRerank),
@@ -167,6 +170,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 					"candidate_cnt": len(candidatesToRerank),
 				})
 				chatManage.SearchResult = candidatesToRerank
+				logTraceabilityCandidates(ctx, chatManage, "post_rerank_fallback", chatManage.SearchResult)
 				spanOutput = map[string]interface{}{
 					"stage":              "api_error_fallback",
 					"candidate_count":    len(candidatesToRerank),
@@ -222,6 +226,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 
 	final := applyMMR(ctx, reranked, chatManage, min(len(reranked), max(1, chatManage.RerankTopK)), 0.7)
 	chatManage.RerankResult = final
+	logTraceabilityCandidates(ctx, chatManage, "post_rerank", chatManage.RerankResult)
 
 	// Log composite top scores and MMR selection summary
 	topN := min(3, len(reranked))
@@ -643,7 +648,7 @@ func cleanPassageForRerank(text string) string {
 
 // getEnrichedPassage 合并Content、ImageInfo和GeneratedQuestions的文本内容
 func getEnrichedPassage(ctx context.Context, result *types.SearchResult) string {
-	combinedText := cleanPassageForRerank(result.Content)
+	combinedText := cleanPassageForRerank(searchutil.JoinChunkContent(result.ContextHeader, result.Content, "\n\n"))
 	var enrichments []string
 
 	// 解析ImageInfo

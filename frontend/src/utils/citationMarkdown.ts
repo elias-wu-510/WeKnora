@@ -33,12 +33,14 @@ export function stripIncompleteCitationTag(content: string): string {
 
 export type CitationKnowledgeRef = {
   id?: string
+  sub_chunk_id?: string[]
   knowledge_id?: string
   knowledge_title?: string
   knowledge_filename?: string
   chunk_index?: number
   chunk_type?: string
   knowledge_base_id?: string
+  content?: string
 }
 
 function parseTagAttributes(attrString: string): Record<string, string> {

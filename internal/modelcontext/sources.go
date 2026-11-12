@@ -24,6 +24,10 @@ type ChunkReference struct {
 	DocumentTitle   string
 	ChunkIndex      int
 	ChunkType       string
+	// Content is the chunk body kept for deterministic citation verification.
+	// It is request-scoped and never persisted.
+	Content  string
+	Evidence []types.CitationEvidence
 }
 
 // webMeta is the per-web-page metadata stored next to the raw URL.
@@ -92,6 +96,9 @@ func (r *sourceRegistry) registerChunk(ref ChunkReference, evidence bool) string
 	if shortSourceHandleRE.MatchString(ref.ChunkID) {
 		return knownHandle(r.chunks, ref.ChunkID)
 	}
+	if ref.Evidence != nil {
+		ref.Evidence = append([]types.CitationEvidence{}, ref.Evidence...)
+	}
 	handle := r.chunks.register(ref.ChunkID, ref.ChunkID, ref, mergeChunkReference)
 	if evidence {
 		r.citable.Store(handle, true)
@@ -115,6 +122,32 @@ func mergeChunkReference(dst *ChunkReference, src ChunkReference) {
 	if dst.ChunkType == "" {
 		dst.ChunkType = src.ChunkType
 	}
+	if dst.Content == "" {
+		dst.Content = src.Content
+	}
+	// Resolved metadata is a shallow snapshot. Never mutate an evidence slice
+	// another goroutine may already be reading while a tool registers sources.
+	if src.Evidence != nil {
+		dst.Evidence = append([]types.CitationEvidence{}, dst.Evidence...)
+	}
+	for _, evidence := range src.Evidence {
+		appendChunkEvidence(dst, evidence)
+	}
+}
+
+func appendChunkEvidence(ref *ChunkReference, evidence types.CitationEvidence) {
+	if ref == nil || evidence.ChunkID == "" || evidence.Content == "" {
+		return
+	}
+	for i := range ref.Evidence {
+		if ref.Evidence[i].ChunkID == evidence.ChunkID {
+			if ref.Evidence[i].Content == "" {
+				ref.Evidence[i] = evidence
+			}
+			return
+		}
+	}
+	ref.Evidence = append(ref.Evidence, evidence)
 }
 
 func (r *sourceRegistry) RegisterDocument(id string) string {
@@ -180,14 +213,37 @@ func (r *sourceRegistry) RegisterSearchResults(results []*types.SearchResult) {
 		}
 		r.RegisterDocument(result.KnowledgeID)
 		r.RegisterKnowledgeBase(result.KnowledgeBaseID)
-		r.RegisterChunk(ChunkReference{
+		evidenceChunks := result.CitationEvidence
+		if evidenceChunks == nil && result.Content != "" && !result.ContentRewritten && len(result.SubChunkID) == 0 {
+			evidenceChunks = []types.CitationEvidence{{
+				ChunkID:         result.ID,
+				KnowledgeID:     result.KnowledgeID,
+				KnowledgeBaseID: result.KnowledgeBaseID,
+				DocumentTitle:   firstNonEmpty(result.KnowledgeTitle, result.KnowledgeFilename),
+				ChunkIndex:      result.ChunkIndex,
+				ChunkType:       result.ChunkType,
+				Content:         result.Content,
+			}}
+		}
+		if evidenceChunks == nil && (result.ContentRewritten || len(result.SubChunkID) > 0) {
+			// Older persisted merged results have no atomic provenance. They
+			// cannot be treated as the leading chunk's original body.
+			evidenceChunks = []types.CitationEvidence{}
+		}
+		// Image captions stay retrievable and visible to the model, but they are
+		// paraphrases rather than source text: they must not be cited as
+		// evidence. Non-evidence handles fail closed in ExpandText.
+		evidence := result.ChunkType != types.ChunkTypeImageCaption
+		r.registerChunk(ChunkReference{
 			ChunkID:         result.ID,
 			KnowledgeID:     result.KnowledgeID,
 			KnowledgeBaseID: result.KnowledgeBaseID,
 			DocumentTitle:   firstNonEmpty(result.KnowledgeTitle, result.KnowledgeFilename),
 			ChunkIndex:      result.ChunkIndex,
 			ChunkType:       result.ChunkType,
-		})
+			Content:         result.Content,
+			Evidence:        evidenceChunks,
+		}, evidence)
 	}
 }
 

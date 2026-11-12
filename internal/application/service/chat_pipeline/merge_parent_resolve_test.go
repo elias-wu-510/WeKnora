@@ -13,7 +13,8 @@ import (
 func TestResolveParentChunksUsesCurrentContentAndImageURLs(t *testing.T) {
 	parent := &types.Chunk{
 		ID: "parent", ChunkType: types.ChunkTypeParentText, ChunkIndex: 7,
-		Content: "manually inserted prefix\n\n![one](u1)\n\nparent body\n\n![two](u2)",
+		ContextHeader: "5. General requirements",
+		Content:       "manually inserted prefix\n\n![one](u1)\n\nparent body\n\n![two](u2)",
 	}
 	imageInfo, err := json.Marshal([]types.ImageInfo{{URL: "u2", OCRText: "two"}})
 	if err != nil {
@@ -35,7 +36,7 @@ func TestResolveParentChunksUsesCurrentContentAndImageURLs(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	result := &types.SearchResult{
 		ID: "child", KnowledgeID: "doc", ChunkType: string(types.ChunkTypeText),
-		ParentChunkID: "parent", Content: "current edited child body", StartAt: 999, EndAt: 1001,
+		ParentChunkID: "parent", Content: "current edited child body", ContextHeader: "5. General requirements\n(viii)", StartAt: 999, EndAt: 1001,
 	}
 
 	got := plugin.resolveParentChunks(ctx, &types.ChatManage{}, []*types.SearchResult{result})
@@ -44,6 +45,9 @@ func TestResolveParentChunksUsesCurrentContentAndImageURLs(t *testing.T) {
 	}
 	if !strings.Contains(got[0].Content, "current edited child body") {
 		t.Fatalf("edited child content was lost: %q", got[0].Content)
+	}
+	if got[0].ContextHeader != "5. General requirements\n(viii)" {
+		t.Fatalf("parent/child heading breadcrumb was not preserved: %q", got[0].ContextHeader)
 	}
 	if strings.Contains(got[0].Content, "u1") || !strings.Contains(got[0].Content, "u2") {
 		t.Fatalf("parent images were not scoped by URL: %q", got[0].Content)

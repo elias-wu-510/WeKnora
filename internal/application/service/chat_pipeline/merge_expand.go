@@ -216,14 +216,21 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 		beforeLen := runeLen(res.Content)
 		res.Content = merged
 		res.ContentRewritten = true
-
-		for _, id := range prevIDs {
-			if id != "" && !containsID(res.SubChunkID, id) {
-				res.SubChunkID = append(res.SubChunkID, id)
+		// Expansion rebuilds Content from these chunks. Citation matching also
+		// checks each fact against the final (possibly truncated) model context.
+		res.CitationEvidence = []types.CitationEvidence{}
+		res.SubChunkID = nil
+		memberIDs := append(append(append([]string{}, prevIDs...), baseChunk.ID), nextIDs...)
+		for _, id := range memberIDs {
+			member := chunkMap[id]
+			if member == nil || member.KnowledgeID != baseChunk.KnowledgeID {
+				continue
 			}
-		}
-		for _, id := range nextIDs {
-			if id != "" && !containsID(res.SubChunkID, id) {
+			if member.Content == "" {
+				continue
+			}
+			appendCitationEvidence(res, citationEvidenceFromChunk(res, member.ID, member.Content, member.ChunkType, member.ChunkIndex))
+			if id != res.ID && !containsID(res.SubChunkID, id) {
 				res.SubChunkID = append(res.SubChunkID, id)
 			}
 		}

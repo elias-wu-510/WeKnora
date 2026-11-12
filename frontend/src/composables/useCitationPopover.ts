@@ -95,7 +95,8 @@ export function useCitationPopover(rootRef: Ref<HTMLElement | null>, options: Ci
 
   const openKb = async (el: HTMLElement) => {
     // Embedded hover historically loads the raw ID; drawer highlights resolve aliases.
-    const chunkId = isChat ? resolveChunkId(el) : el.getAttribute('data-chunk-id') || ''
+    const rawChunkId = el.getAttribute('data-chunk-id') || ''
+    const chunkId = isChat ? resolveChunkId(el) : rawChunkId
     const title = el.getAttribute('data-doc') || ''
     if (!chunkId) return
     const version = ++requestVersion
@@ -106,6 +107,20 @@ export function useCitationPopover(rootRef: Ref<HTMLElement | null>, options: Ci
     positionFor(el, 4)
 
     const scope = options.getCacheScope()
+    const citationRef = options.getKnowledgeReferences?.()?.find((reference) =>
+      reference?.id === chunkId || reference?.id === rawChunkId ||
+      reference?.sub_chunk_id?.includes(chunkId) || reference?.sub_chunk_id?.includes(rawChunkId),
+    )
+    const citationContent = String(citationRef?.content || '').trim()
+    if (citationContent) {
+      const result = { content: citationContent }
+      setCitationChunkCache(scope, chunkId, result)
+      float.value.content = citationContent
+      float.value.error = ''
+      float.value.loading = false
+      return
+    }
+
     const cached = getCitationChunkCache(scope, chunkId)
     if (cached) {
       float.value.content = cached.content

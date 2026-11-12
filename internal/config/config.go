@@ -96,6 +96,7 @@ type ConversationConfig struct {
 	KeywordThreshold     float64        `yaml:"keyword_threshold"                json:"keyword_threshold"`
 	EmbeddingTopK        int            `yaml:"embedding_top_k"                  json:"embedding_top_k"`
 	VectorThreshold      float64        `yaml:"vector_threshold"                 json:"vector_threshold"`
+	RerankModelID        string         `yaml:"rerank_model_id"                  json:"rerank_model_id"`
 	RerankTopK           int            `yaml:"rerank_top_k"                     json:"rerank_top_k"`
 	RerankThreshold      float64        `yaml:"rerank_threshold"                 json:"rerank_threshold"`
 	FallbackStrategy     string         `yaml:"fallback_strategy"                json:"fallback_strategy"`

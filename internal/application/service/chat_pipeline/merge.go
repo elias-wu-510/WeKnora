@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 	"sort"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -60,6 +61,9 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 
 	// Step 3: Inject history references
 	searchResult = p.injectHistoryResults(ctx, chatManage, searchResult)
+	for _, result := range searchResult {
+		ensureCitationEvidence(result)
+	}
 
 	pipelineInfo(ctx, "Merge", "candidate_ready", map[string]interface{}{
 		"chunk_cnt": len(searchResult),
@@ -310,6 +314,7 @@ func (p *PluginMerge) resolveParentChunks(
 	}
 
 	for _, r := range results {
+		ensureCitationEvidence(r)
 		if r.ParentChunkID == "" {
 			continue
 		}
@@ -332,6 +337,7 @@ func (p *PluginMerge) resolveParentChunks(
 			})
 			assignScopedImageInfo(r, scopedImageInfo, r.ID)
 			parentContent := searchutil.PruneMarkdownImagesByImageInfo(parent.Content, r.ImageInfo)
+			r.ContextHeader = mergeContextHeaders(parent.ContextHeader, r.ContextHeader)
 			r.Content = searchutil.JoinChunkContent(parentContent, r.Content, "\n\n")
 			r.ContentRewritten = true
 			if !containsID(r.SubChunkID, r.ID) {
@@ -358,6 +364,13 @@ func (p *PluginMerge) resolveParentChunks(
 					contentSource = grandparent
 				}
 			}
+			if r.ChunkType == string(types.ChunkTypeImageOCR) {
+				appendCitationEvidence(r, citationEvidenceFromChunk(r, textParent.ID, textParent.Content, string(textParent.ChunkType), textParent.ChunkIndex))
+				if !containsID(r.SubChunkID, textParent.ID) {
+					r.SubChunkID = append(r.SubChunkID, textParent.ID)
+				}
+			}
+			r.ContextHeader = mergeContextHeaders(contentSource.ContextHeader, textParent.ContextHeader, r.ContextHeader)
 			r.Content = textParent.Content
 			r.ChunkIndex = textParent.ChunkIndex
 			r.ContentRewritten = true
@@ -393,6 +406,28 @@ func (p *PluginMerge) resolveParentChunks(
 	}
 
 	return results
+}
+
+// mergeContextHeaders carries real heading breadcrumbs across parent/child
+// expansion. It preserves each distinct level and never equates section and
+// chapter labels merely because their numbers match.
+func mergeContextHeaders(headers ...string) string {
+	var lines []string
+	seen := make(map[string]struct{})
+	for _, header := range headers {
+		for _, line := range strings.Split(header, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if _, ok := seen[line]; ok {
+				continue
+			}
+			seen[line] = struct{}{}
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // collectScopedTextChildIDs returns text chunk IDs whose image_info should be

@@ -266,6 +266,28 @@ test('embed scopes include channel and token for both entry points and preserve 
   }
 })
 
+for (const mode of ['chat', 'embed'] as const) {
+  test(`${mode}: hover uses the answer reference content before fetching the original chunk`, async t => {
+    const mergedId = `merged-${mode}`
+    const f = fixture(mode, { refs: [{ id: mergedId, sub_chunk_id: ['member'], content: 'leading chunk\nmerged member evidence' }] }); t.after(f.close)
+    f.fire('mouseover', kb('member')); f.tick(80); await flush()
+    assert.equal(f.requests.length, 0)
+    assert.equal(f.state.float.value.content, 'leading chunk\nmerged member evidence')
+  })
+
+  test(`${mode}: merged reference content replaces an in-flight raw chunk load`, async t => {
+    const f = fixture(mode); t.after(f.close)
+    f.fire('click', kb('first'))
+    assert.equal(f.state.float.value.loading, true)
+    f.refs.value = [{ id: 'merged', sub_chunk_id: ['member'], content: 'member evidence' }]
+    f.fire('click', kb('member')); await flush()
+    assert.equal(f.state.float.value.loading, false)
+    assert.equal(f.state.float.value.content, 'member evidence')
+    f.requests[0]!.pending.resolve('stale raw body'); await flush()
+    assert.equal(f.state.float.value.content, 'member evidence')
+  })
+}
+
 test('only chat observes viewport changes and keeps hovered popups open', t => {
   for (const mode of ['chat', 'embed'] as const) {
     const f = fixture(mode); t.after(f.close)

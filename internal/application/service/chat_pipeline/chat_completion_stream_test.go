@@ -117,16 +117,9 @@ func TestStreamDropsIncompleteHandleOnCancel(t *testing.T) {
 	plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
 	require.Nil(t, plugin.OnEvent(ctx, types.CHAT_COMPLETION_STREAM, chatManage, func() *PluginError { return nil }))
 
-	// Wait until the pre-hold content has been emitted, then cancel.
-	require.Eventually(t, func() bool {
-		for _, c := range bus.finalAnswerContents() {
-			if c == "hello " {
-				return true
-			}
-		}
-		return false
-	}, 2*time.Second, 5*time.Millisecond)
-
+	// A2a buffers the answer, so nothing is emitted before Done. Let the
+	// stream feed the buffer, then cancel.
+	time.Sleep(100 * time.Millisecond)
 	cancel()
 
 	// Give the cancellation path time to flush, then assert that only the
@@ -153,10 +146,10 @@ func TestStreamIgnoresDuplicateTerminalAnswer(t *testing.T) {
 	require.Nil(t, plugin.OnEvent(context.Background(), types.CHAT_COMPLETION_STREAM, chatManage, func() *PluginError { return nil }))
 
 	require.Eventually(t, func() bool {
-		bus.mu.Lock()
-		defer bus.mu.Unlock()
-		return len(bus.events) == 2
+		return len(bus.finalAnswerEvents()) == 1
 	}, 2*time.Second, 5*time.Millisecond)
+	// Give a duplicate terminal response a chance to (wrongly) emit again.
+	time.Sleep(50 * time.Millisecond)
 
 	bus.mu.Lock()
 	defer bus.mu.Unlock()
@@ -166,7 +159,7 @@ func TestStreamIgnoresDuplicateTerminalAnswer(t *testing.T) {
 			answerEvents = append(answerEvents, evt.Data.(event.AgentFinalAnswerData))
 		}
 	}
-	require.Equal(t, []event.AgentFinalAnswerData{{Content: "hello"}, {Done: true}}, answerEvents)
+	require.Equal(t, []event.AgentFinalAnswerData{{Content: "hello", Done: true}}, answerEvents)
 }
 
 func TestStreamReportsEmptyLengthTruncation(t *testing.T) {
@@ -216,15 +209,12 @@ func TestStreamMarksPartialLengthTruncation(t *testing.T) {
 			))
 
 			require.Eventually(t, func() bool {
-				return len(bus.finalAnswerEvents()) == 2
+				return len(bus.finalAnswerEvents()) == 1
 			}, 2*time.Second, 5*time.Millisecond)
 			events := bus.finalAnswerEvents()
-			require.Equal(t, "partial answer", events[0].Content+events[1].Content)
-			require.False(t, events[0].Done)
-			require.False(t, events[0].Truncated)
-			require.True(t, events[1].Done)
-			require.True(t, events[1].Truncated)
-			require.NotContains(t, events[1].Content, EmptyTruncatedAnswerFallback)
+			require.Equal(t, "partial answer", events[0].Content)
+			require.True(t, events[0].Done)
+			require.True(t, events[0].Truncated)
 		})
 	}
 }

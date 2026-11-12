@@ -1,0 +1,8 @@
+# 本地凭据、运行日志与临时产物：不入库
+admin-credentials*.txt
+nginx-access.log
+nginx-error.log
+tmp/
+
+# 历史快照留在磁盘即可，不入库
+*.bak-*
