@@ -1,6 +1,6 @@
 <template>
     <div class="main" ref="dropzone" :style="{ '--sidebar-width': `${uiStore.sidebarDisplayWidth}px` }">
-        <Menu></Menu>
+        <Menu v-if="!embeddedView"></Menu>
         <div v-if="isRouterAlive" class="platform-route-outlet">
             <RouterView />
         </div>
@@ -37,11 +37,14 @@ import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { collectDroppedFiles } from './collectDroppedFiles'
+import { isEmbeddedView } from '@/utils/embeddedView'
 
 const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
 const uiStore = useUIStore();
+// 被 Senior AI 以 iframe 嵌入时（?embed=1）不渲染左侧菜单，内容区独占整宽。
+const embeddedView = isEmbeddedView();
 let ismask = ref(false)
 const { t } = useI18n();
 
