@@ -599,7 +599,12 @@ const persistLoginResponse = async (response: any, skipRedirect = false) => {
   router.replace(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
 }
 
-const getBackendOIDCRedirectURI = () => `${window.location.origin}/api/v1/auth/oidc/callback`
+const getBackendOIDCRedirectURI = () => {
+  // The SPA can be mounted under a path prefix (C-Knowledge lives at
+  // /c-knowledge/), so the callback has to carry that prefix too.
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/+$/, '')
+  return `${window.location.origin}${base}/api/v1/auth/oidc/callback`
+}
 
 const loadOIDCConfig = async () => {
   try {
