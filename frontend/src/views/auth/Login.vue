@@ -352,7 +352,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
 import { newPasswordRules } from '@/utils/passwordPolicy'
-import { afterLoginPath, isCKnowledgeConsole } from '@/utils/ckConsole'
+import { afterLoginPath, isCKnowledgeConsole, resolveTenantSelection } from '@/utils/ckConsole'
 import ckLogo from '@/assets/img/ck-logo.svg'
 import { Swiper, SwiperSlide } from 'swiper/vue'
 import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
@@ -592,11 +592,13 @@ const persistLoginResponse = async (response: any, skipRedirect = false) => {
     // previous session for a different account.
     const activeIdNum = Number(activeTenant?.id)
     const homeIdNum = Number(homeTenantIdRaw)
-    if (Number.isFinite(activeIdNum) && Number.isFinite(homeIdNum) && activeIdNum !== homeIdNum) {
-      authStore.setSelectedTenant(activeIdNum, activeTenant?.name || null)
-    } else {
-      authStore.setSelectedTenant(null, null)
-    }
+    const selection = resolveTenantSelection({
+      activeTenantId: Number.isFinite(activeIdNum) ? activeIdNum : null,
+      activeTenantName: activeTenant?.name || null,
+      homeTenantId: Number.isFinite(homeIdNum) ? homeIdNum : null,
+      memberships: response.memberships,
+    })
+    authStore.setSelectedTenant(selection.id, selection.name)
   }
 
   // Pull runtime capabilities (including whether ordinary users may create

@@ -19,6 +19,7 @@ import { initFont } from "@/composables/useFont";
 import { installTDesignIconOfflineGuard } from "@/utils/tdesign-icon-offline";
 import { installAutofillGuard } from "@/utils/disable-autofill";
 import { useAuthStore } from "@/stores/auth";
+import { preferredTenant, rememberPreferredTenant } from "@/utils/ckConsole";
 
 // 必须在 Vue 组件挂载之前执行，避免 tdesign-icons 运行时请求 tdesign.gtimg.com
 installTDesignIconOfflineGuard();
@@ -36,8 +37,17 @@ function applyTenantHint(): void {
   try {
     const url = new URL(window.location.href);
     const raw = (url.searchParams.get("tenant") || "").trim();
-    if (!/^\d+$/.test(raw) || raw === "0") return;
+    if (!/^\d+$/.test(raw) || raw === "0") {
+      // 回调页、刷新后的控制台地址上没有 tenant 参数：只要还有登录态，
+      // 就按上次记住的共享空间恢复，避免落回个人空间后显示「全部 0」。
+      const remembered = preferredTenant();
+      if (remembered && localStorage.getItem("weknora_token") && !localStorage.getItem("weknora_selected_tenant_id")) {
+        localStorage.setItem("weknora_selected_tenant_id", String(remembered));
+      }
+      return;
+    }
     localStorage.setItem("weknora_selected_tenant_id", raw);
+    rememberPreferredTenant(Number(raw));
     url.searchParams.delete("tenant");
     const query = url.searchParams.toString();
     window.history.replaceState({}, document.title, `${url.pathname}${query ? `?${query}` : ""}${url.hash}`);
