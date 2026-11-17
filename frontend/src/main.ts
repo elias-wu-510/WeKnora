@@ -26,7 +26,28 @@ installTDesignIconOfflineGuard();
 initTheme();
 initFont();
 
+/**
+ * C-Knowledge 管理台由 Senior AI 以 `?tenant=<id>` 指定要进入的共享空间。
+ * 必须在 auth store 初始化之前落到 localStorage：首个 /auth/me 会据此带
+ * X-Tenant-ID，否则会落回用户的个人空间（症状：管理台「全部 0」）。
+ * 只接受正整数；服务端仍会校验 membership，无权访问时接口照常拒绝。
+ */
+function applyTenantHint(): void {
+  try {
+    const url = new URL(window.location.href);
+    const raw = (url.searchParams.get("tenant") || "").trim();
+    if (!/^\d+$/.test(raw) || raw === "0") return;
+    localStorage.setItem("weknora_selected_tenant_id", raw);
+    url.searchParams.delete("tenant");
+    const query = url.searchParams.toString();
+    window.history.replaceState({}, document.title, `${url.pathname}${query ? `?${query}` : ""}${url.hash}`);
+  } catch {
+    /* URL 解析失败时忽略，按默认空间启动 */
+  }
+}
+
 async function bootstrap() {
+  applyTenantHint();
   const app = createApp(App);
 
   // 全局错误处理：捕获未处理的组件错误，防止白屏

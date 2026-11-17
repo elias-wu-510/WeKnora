@@ -16,12 +16,14 @@
         <GlobalInvitationBell />
         <!-- 知识库文件上传进度浮层：上传队列放在 store 里，切换页面不中断 -->
         <UploadTasksPanel />
-        <!-- 带遮罩层的新手引导：首次进入自动开启，可从用户菜单顶部昵称旁帮助按钮重新打开 -->
-        <NewUserGuide />
+        <!-- 带遮罩层的新手引导：首次进入自动开启，可从用户菜单顶部昵称旁帮助按钮重新打开。
+             C-Knowledge 控制台是白标产品，不展示引擎的 WeKnora 引导。 -->
+        <NewUserGuide v-if="!isCkConsole" />
     </div>
 </template>
 <script setup lang="ts">
 import Menu from '@/components/menu.vue'
+import { isCKnowledgeConsole } from '@/utils/ckConsole'
 import { ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
 import UploadMask from '@/components/upload-mask.vue'
@@ -39,6 +41,7 @@ import { useI18n } from 'vue-i18n'
 import { collectDroppedFiles } from './collectDroppedFiles'
 import { isEmbeddedView } from '@/utils/embeddedView'
 
+const isCkConsole = isCKnowledgeConsole()
 const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();

@@ -42,7 +42,7 @@
           <div class="dropdown-user-meta">
             <div class="dropdown-user-name-row">
               <span class="dropdown-user-name">{{ userName }}</span>
-              <t-tooltip :content="$t('newUserGuide.reopen')" placement="top">
+              <t-tooltip v-if="!isCkConsole" :content="$t('newUserGuide.reopen')" placement="top">
                 <button type="button" class="dropdown-guide-btn" :aria-label="$t('newUserGuide.reopen')"
                   @click.stop="reopenGuide">
                   <t-icon name="help-circle" size="14px" />
@@ -108,6 +108,7 @@
           <span>{{ $t('settings.navGroups.systemAdministration') }}</span>
         </div>
         <div class="menu-divider"></div>
+        <template v-if="!isCkConsole">
         <div class="menu-item" @click="openDocs">
           <t-icon name="help-circle" class="menu-icon" />
           <span class="menu-text-with-icon">
@@ -129,6 +130,7 @@
             </svg>
           </span>
         </div>
+        </template>
         <template v-if="!authStore.isLiteMode">
           <div class="menu-divider"></div>
           <div class="menu-item danger" @click="handleLogout">
@@ -201,6 +203,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
+import { isCKnowledgeConsole } from '@/utils/ckConsole'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { getCurrentUser, logout as logoutApi, userInfoFromApi } from '@/api/auth'
 import { useI18n } from 'vue-i18n'
@@ -219,6 +222,7 @@ const { t } = useI18n()
 
 const router = useRouter()
 const uiStore = useUIStore()
+const isCkConsole = isCKnowledgeConsole()
 const authStore = useAuthStore()
 const { formatRole, roleIcon } = useRoleLabel()
 const { homeTenantId, isHomeTenantActive, isHomeTenant } = useHomeTenant()

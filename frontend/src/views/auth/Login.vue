@@ -1,5 +1,5 @@
 <template>
-  <div class="login-layout">
+  <div class="login-layout" :class="{ 'login-layout--ck': isCkConsole }">
     <div class="animated-bg">
       <div class="knowledge-node node-1">
         <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -96,12 +96,17 @@
     </div>
 
     <!-- Logo - Top Left -->
-    <a href="https://github.com/Tencent/WeKnora" target="_blank" class="header-logo" :title="$t('common.github')">
+    <div v-if="isCkConsole" class="header-logo header-logo--ck" title="C-Knowledge">
+      <img :src="ckLogo" alt="C-Knowledge" class="logo-image logo-image--ck" />
+      <span class="header-wordmark">C-Knowledge</span>
+    </div>
+    <a v-else href="https://github.com/Tencent/WeKnora" target="_blank" class="header-logo" :title="$t('common.github')">
       <img src="@/assets/img/weknora.png" alt="WeKnora" class="logo-image" />
     </a>
 
     <!-- Header Links - Top Right -->
     <div class="header-links">
+      <template v-if="!isCkConsole">
       <a href="https://weknora.weixin.qq.com" target="_blank" class="header-link" :title="$t('common.website')">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
           stroke-linecap="round">
@@ -119,6 +124,7 @@
         </svg>
         <span class="link-text">GitHub</span>
       </a>
+      </template>
 
       <div class="language-switch">
         <button @click="toggleLanguageMenu" class="header-link" :title="currentLangOption?.label">
@@ -142,8 +148,8 @@
       </div>
     </div>
 
-    <!-- Left Showcase Section -->
-    <div class="showcase-section">
+    <!-- Left Showcase Section：C-Knowledge 是白标控制台，不展示引擎营销页 -->
+    <div v-if="!isCkConsole" class="showcase-section">
       <div class="showcase-content">
         <p class="showcase-subtitle">{{ $t('platform.subtitle') }}</p>
         <p class="showcase-description">{{ $t('platform.description') }}</p>
@@ -193,8 +199,8 @@
             {{ inviteLookupError }}
           </div>
           <div class="form-header">
-            <h2 class="form-title">{{ $t('auth.login') }}</h2>
-            <p class="form-welcome">{{ $t('auth.subtitle') }}</p>
+            <h2 class="form-title">{{ isCkConsole ? '登录 C-Knowledge' : $t('auth.login') }}</h2>
+            <p class="form-welcome">{{ isCkConsole ? '使用 Senior AI 账号进入知识库管理台' : $t('auth.subtitle') }}</p>
             <p v-if="registrationEnabled" class="form-hint">{{ $t('auth.loginHint') }}</p>
           </div>
 
@@ -346,6 +352,8 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
 import { newPasswordRules } from '@/utils/passwordPolicy'
+import { afterLoginPath, isCKnowledgeConsole } from '@/utils/ckConsole'
+import ckLogo from '@/assets/img/ck-logo.svg'
 import { Swiper, SwiperSlide } from 'swiper/vue'
 import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
 import 'swiper/css'
@@ -372,6 +380,7 @@ import screenshot2 from '@/assets/img/screenshot-2.svg'
 import screenshot3 from '@/assets/img/screenshot-3.svg'
 import screenshot4 from '@/assets/img/screenshot-4.svg'
 
+const isCkConsole = isCKnowledgeConsole()
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
@@ -596,7 +605,7 @@ const persistLoginResponse = async (response: any, skipRedirect = false) => {
   await authStore.refreshFromAuthMe()
   await nextTick()
   if (skipRedirect) return
-  router.replace(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
+  router.replace(afterLoginPath(authStore.hasValidTenant))
 }
 
 const getBackendOIDCRedirectURI = () => {
@@ -1072,6 +1081,37 @@ onMounted(async () => {
 }
 
 /* Left Showcase Section */
+.login-layout--ck {
+  align-items: center;
+  justify-content: center;
+
+  .form-section {
+    flex: 1 1 auto;
+    align-items: center;
+    padding: 96px 24px 64px;
+  }
+}
+
+.header-logo--ck {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+
+.header-logo.header-logo--ck .logo-image--ck {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+}
+
+.header-wordmark {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+
 .showcase-section {
   flex: 0 0 52%;
   display: flex;

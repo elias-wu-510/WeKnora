@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import type { QuestionOrigin } from '@/utils/questionOrigin'
+import { isCKnowledgeConsole } from '@/utils/ckConsole'
 
 type MenuChild = Record<string, any>
 
@@ -74,7 +75,13 @@ export const useMenuStore = defineStore('menuStore', () => {
   const visibleMenuArr = computed(() => {
     const authStore = useAuthStore()
     const deploymentCapabilities = useDeploymentCapabilitiesStore()
+    const ckConsole = isCKnowledgeConsole()
     return menuArr.filter(item => {
+      // C-Knowledge 控制台不提供「共享空间」入口：共享库由 Senior AI 统一维护，
+      // 使用者只需要在知识库里检索与管理资料。
+      if (ckConsole && item.path === 'organizations') {
+        return false
+      }
       if (authStore.isLiteMode && liteHiddenPaths.has(item.path)) {
         return false
       }

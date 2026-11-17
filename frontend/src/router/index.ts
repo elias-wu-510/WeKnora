@@ -8,6 +8,10 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
 import { normalizeSettingsSection } from '@/config/settingsRoute'
 import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
+import { CK_HOME_PATH, isCKnowledgeConsole } from '@/utils/ckConsole'
+
+/** 控制台登录后的默认落点：C-Knowledge 用自有首页，引擎站点保持知识库列表。 */
+const consoleLandingPath = () => (isCKnowledgeConsole() ? CK_HOME_PATH : '/platform/knowledge-bases')
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -49,7 +53,22 @@ const router = createRouter({
   routes: [
     {
       path: "/",
-      redirect: "/platform/knowledge-bases",
+      redirect: () => consoleLandingPath(),
+    },
+    {
+      // C-Knowledge 自有首页：沿用平台布局（侧栏骨架 + 内容区），
+      // 内容换成面向 Senior AI 使用者的知识库总览，而不是引擎默认列表页。
+      path: "/home",
+      component: () => import("../views/platform/index.vue"),
+      meta: { requiresInit: true, requiresAuth: true },
+      children: [
+        {
+          path: "",
+          name: "ckHome",
+          component: () => import("../views/home/CKnowledgeHome.vue"),
+          meta: { requiresInit: true, requiresAuth: true, ckHome: true },
+        },
+      ],
     },
     {
       path: "/login",
@@ -361,7 +380,7 @@ router.beforeEach(async (to, from, next) => {
       }
     }
     if (authStore.hasValidTenant) {
-      next('/platform/knowledge-bases')
+      next(consoleLandingPath())
     } else {
       next()
     }
@@ -372,7 +391,7 @@ router.beforeEach(async (to, from, next) => {
   if (to.meta.requiresAuth === false || to.meta.requiresInit === false) {
     // 如果已登录用户访问登录页面，重定向到知识库列表页面
     if (to.path === '/login' && authStore.isLoggedIn) {
-      next(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
+      next(authStore.hasValidTenant ? consoleLandingPath() : '/onboarding/workspace')
       return
     }
     next()
@@ -425,7 +444,7 @@ router.beforeEach(async (to, from, next) => {
   const requiredCapability = to.meta.requiredCapability as DeploymentCapabilityKey | undefined
   if (requiredCapability && !deploymentCapabilities.isSupported(requiredCapability)) {
     MessagePlugin.warning(i18n.global.t('settings.capabilityUnavailable'))
-    next('/platform/knowledge-bases')
+    next(consoleLandingPath())
     return
   }
 
@@ -435,7 +454,7 @@ router.beforeEach(async (to, from, next) => {
   // the bounce. This is UI-only; the server enforces the real check.
   if (to.meta.requiresSystemAdmin === true) {
     if (!authStore.isSystemAdmin) {
-      next('/platform/knowledge-bases')
+      next(consoleLandingPath())
       return
     }
   }

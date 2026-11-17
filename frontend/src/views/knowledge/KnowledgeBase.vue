@@ -9,6 +9,7 @@ import ContextualGuide from '@/components/ContextualGuide.vue';
 import KBInfoPopover from '@/components/KBInfoPopover.vue';
 import KBSwitcherDropdown from '@/components/KBSwitcherDropdown.vue';
 import { useUIStore } from '@/stores/ui';
+import { isCKnowledgeConsole } from '@/utils/ckConsole';
 import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
 import { permissionCanEditKB, permissionCanManageKB } from '@/utils/kbPermission';
@@ -1767,7 +1768,8 @@ const handleOpenKBSettings = () => {
 };
 
 const handleNavigateToKbList = () => {
-  router.push('/platform/knowledge-bases');
+  // C-Knowledge 的根级「知识库」面包屑回到自有首页，而不是引擎列表页。
+  router.push(isCKnowledgeConsole() ? '/home' : '/platform/knowledge-bases');
 };
 
 const handleNavigateToCurrentKB = () => {
