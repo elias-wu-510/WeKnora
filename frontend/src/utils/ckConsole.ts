@@ -149,3 +149,36 @@ export function resolveConsoleBootSelection(input: {
     memberships: input.memberships,
   })
 }
+
+/**
+ * C-Knowledge 的支持入口。上游引擎的帮助文档 / 报错提单入口指向
+ * github.com/Tencent/WeKnora，白标产品里必须换成 Senior AI 自己的支持渠道。
+ */
+export const CK_SUPPORT_URL = 'https://llm-ai.c-smart.hk/senior-ai/settings#help'
+export const CK_SUPPORT_EMAIL = 'support@senior-ai.dev'
+
+/**
+ * 隐藏仍然指向原厂仓库的文档/提单入口（设置弹窗、集成页等都是懒加载的，
+ * 所以用一个 body 级观察器兜住）。支持入口已由 `CK_SUPPORT_URL` 单独提供。
+ */
+export function hideUpstreamBrandLinks(): () => void {
+  if (!isCKnowledgeConsole() || typeof document === 'undefined') return () => {}
+  const selector = 'a[href*="github.com/Tencent/WeKnora"]'
+  const hide = (root: ParentNode) => {
+    root.querySelectorAll<HTMLAnchorElement>(selector).forEach((el) => {
+      el.style.display = 'none'
+    })
+  }
+  hide(document)
+  const observer = new MutationObserver((records) => {
+    for (const record of records) {
+      record.addedNodes.forEach((node) => {
+        if (!(node instanceof HTMLElement)) return
+        if (node.matches(selector)) node.style.display = 'none'
+        hide(node)
+      })
+    }
+  })
+  observer.observe(document.body, { childList: true, subtree: true })
+  return () => observer.disconnect()
+}

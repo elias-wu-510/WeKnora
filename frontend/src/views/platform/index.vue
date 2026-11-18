@@ -23,7 +23,7 @@
 </template>
 <script setup lang="ts">
 import Menu from '@/components/menu.vue'
-import { isCKnowledgeConsole } from '@/utils/ckConsole'
+import { hideUpstreamBrandLinks, isCKnowledgeConsole } from '@/utils/ckConsole'
 import { ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
 import UploadMask from '@/components/upload-mask.vue'
@@ -213,8 +213,12 @@ function applyViewportSidebar() {
 }
 
 // 组件挂载时添加全局事件监听器
+let stopHidingUpstreamLinks: (() => void) | null = null
+
 onMounted(() => {
     applyViewportSidebar()
+    // 白标：隐藏仍然指向原厂仓库的文档/提单入口
+    stopHidingUpstreamLinks = hideUpstreamBrandLinks()
     compactSidebarQuery?.addEventListener('change', applyViewportSidebar)
     document.addEventListener('dragenter', handleGlobalDragEnter, true);
     document.addEventListener('dragover', handleGlobalDragOver, true);
@@ -251,6 +255,8 @@ function maybeOpenCmdkFromRoute() {
 
 // 组件卸载时移除全局事件监听器
 onUnmounted(() => {
+    stopHidingUpstreamLinks?.()
+    stopHidingUpstreamLinks = null
     compactSidebarQuery?.removeEventListener('change', applyViewportSidebar)
     document.removeEventListener('dragenter', handleGlobalDragEnter, true);
     document.removeEventListener('dragover', handleGlobalDragOver, true);

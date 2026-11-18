@@ -108,6 +108,12 @@
           <span>{{ $t('settings.navGroups.systemAdministration') }}</span>
         </div>
         <div class="menu-divider"></div>
+        <div v-if="isCkConsole" class="menu-item" @click="openSupport">
+          <t-icon name="help-circle" class="menu-icon" />
+          <span class="menu-text-with-icon">
+            <span>帮助与支持</span>
+          </span>
+        </div>
         <template v-if="!isCkConsole">
         <div class="menu-item" @click="openDocs">
           <t-icon name="help-circle" class="menu-icon" />
@@ -203,7 +209,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
-import { isCKnowledgeConsole } from '@/utils/ckConsole'
+import { CK_SUPPORT_URL, isCKnowledgeConsole } from '@/utils/ckConsole'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { getCurrentUser, logout as logoutApi, userInfoFromApi } from '@/api/auth'
 import { useI18n } from 'vue-i18n'
@@ -493,6 +499,10 @@ const clampFloatingToViewport = (selector: string, target: { value: Record<strin
 const reopenGuide = () => {
   menuVisible.value = false
   openNewUserGuide()
+}
+
+const openSupport = () => {
+  window.open(CK_SUPPORT_URL, '_blank', 'noopener,noreferrer')
 }
 
 const openDocs = () => {
