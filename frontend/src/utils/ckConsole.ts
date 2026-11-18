@@ -9,7 +9,7 @@
  * 只用构建期 base 判断，避免运行时被 `?embed=1` 等参数误伤（嵌入聊天
  * 页与嵌入管理台共用同一个 base，品牌替换对两者都成立）。
  */
-export const CK_HOSTS = ['ck.c-smart.hk', 'ck-test.c-smart.hk'] as const
+export const CK_HOSTS = ['c-knowledge.c-smart.hk', 'c-knowledge-test.c-smart.hk'] as const
 
 /** 是否跑在 C-Knowledge 自己的域名上（独立子域形态，构建 base 为 `/`）。 */
 export function isCKnowledgeHost(): boolean {
