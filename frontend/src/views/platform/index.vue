@@ -200,8 +200,22 @@ const handleGlobalDrop = async (event: DragEvent) => {
     }));
 }
 
+// 窄屏（手机 / 窄窗口）自动把侧栏收成图标栏：控制台要能在手机上打开，
+// 引擎原有布局最小 600px，窄屏会整页横向溢出。
+const compactSidebarQuery = typeof window !== 'undefined' ? window.matchMedia('(max-width: 900px)') : null
+
+function applyViewportSidebar() {
+    if (embeddedView || !compactSidebarQuery) return
+    // 只改运行时状态、不写 localStorage：手机访问不应覆盖桌面端的展开/收起偏好。
+    uiStore.sidebarCollapsed = compactSidebarQuery.matches
+        ? true
+        : localStorage.getItem('sidebar_collapsed') === 'true'
+}
+
 // 组件挂载时添加全局事件监听器
 onMounted(() => {
+    applyViewportSidebar()
+    compactSidebarQuery?.addEventListener('change', applyViewportSidebar)
     document.addEventListener('dragenter', handleGlobalDragEnter, true);
     document.addEventListener('dragover', handleGlobalDragOver, true);
     document.addEventListener('dragleave', handleGlobalDragLeave, true);
@@ -237,6 +251,7 @@ function maybeOpenCmdkFromRoute() {
 
 // 组件卸载时移除全局事件监听器
 onUnmounted(() => {
+    compactSidebarQuery?.removeEventListener('change', applyViewportSidebar)
     document.removeEventListener('dragenter', handleGlobalDragEnter, true);
     document.removeEventListener('dragover', handleGlobalDragOver, true);
     document.removeEventListener('dragleave', handleGlobalDragLeave, true);
@@ -262,6 +277,13 @@ onUnmounted(() => {
     min-height: 0;
     /* 统一整页背景，让左侧菜单与右侧内容区视觉连贯 */
     background: var(--td-bg-color-container);
+}
+
+/* 窄屏：侧栏收成图标栏后不再需要 600px 下限，否则整页仍会横向溢出 */
+@media (max-width: 900px) {
+    .main {
+        min-width: 0;
+    }
 }
 
 /* 右侧路由区：占满剩余宽度与整列高度，并把 min-height:0 传给子页面以便内部 flex 滚动 */

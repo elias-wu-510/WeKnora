@@ -14,6 +14,30 @@
     <meta name="description" content="WeKnora是一款基于大语言模型的文档理解与语义检索框架，专为结构复杂、内容异构的文档场景而打造。"/>
     <link rel="shortcut icon" type="image/png" href="./public/favicon.ico"/>
     <link rel="apple-touch-icon" sizes="120x120" type="image/png" href="./public/favicon.ico"/>
+    <script>
+      /* C-Knowledge 白标：同一份构建产物，按部署前缀换掉图标与页面元信息（官网页不带前缀，不受影响）。 */
+      (function () {
+        if (location.pathname.indexOf('/c-knowledge/') !== 0) return;
+        var head = document.head;
+        var oldIcon = head.querySelector('link[rel="shortcut icon"]');
+        if (oldIcon) oldIcon.parentNode.removeChild(oldIcon);
+        var icon = document.createElement('link');
+        icon.rel = 'icon';
+        icon.type = 'image/svg+xml';
+        icon.href = './public/ck-favicon.svg';
+        head.appendChild(icon);
+        var oldTouch = head.querySelector('link[rel="apple-touch-icon"]');
+        if (oldTouch) oldTouch.parentNode.removeChild(oldTouch);
+        var touch = document.createElement('link');
+        touch.rel = 'apple-touch-icon';
+        touch.href = './public/ck-favicon.svg';
+        head.appendChild(touch);
+        var desc = head.querySelector('meta[name="description"]');
+        if (desc) desc.setAttribute('content', 'C-Knowledge：香港建筑行业共享知识库管理台，由 Senior AI 维护。');
+        var kw = head.querySelector('meta[name="keywords"]');
+        if (kw) kw.parentNode.removeChild(kw);
+      })();
+    </script>
 </head>
 <body>
 <script>
