@@ -453,8 +453,10 @@ const languageOptions = [
 
 const currentLanguage = computed(() => locale.value)
 const oidcLoginText = computed(() => {
-  if (oidcProviderName.value) {
-    return t('auth.oidcLoginWithProvider', { provider: oidcProviderName.value })
+  // C-Knowledge 面向 Senior AI 用户：这里统一叫「SAI 登录」，不暴露底层 OIDC 供应商名字。
+  const provider = isCkConsole ? 'SAI' : oidcProviderName.value
+  if (provider) {
+    return t('auth.oidcLoginWithProvider', { provider })
   }
   return t('auth.oidcLogin')
 })
