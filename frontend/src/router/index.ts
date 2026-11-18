@@ -8,7 +8,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
 import { normalizeSettingsSection } from '@/config/settingsRoute'
 import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
-import { CK_HOME_PATH, isCKnowledgeConsole } from '@/utils/ckConsole'
+import { CK_HOME_PATH, isCKnowledgeConsole, resolveConsoleBootSelection } from '@/utils/ckConsole'
 
 /** 控制台登录后的默认落点：C-Knowledge 用自有首页，引擎站点保持知识库列表。 */
 const consoleLandingPath = () => (isCKnowledgeConsole() ? CK_HOME_PATH : '/platform/knowledge-bases')
@@ -327,6 +327,19 @@ async function hydrateSessionFromToken(authStore: ReturnType<typeof useAuthStore
     authStore.setAutoAcceptInvitation(
       response.data?.capabilities?.auto_accept_invitation === true,
     )
+
+    // C-Knowledge 独立入口：硬刷新（token 还在、store 为空）时成员关系刚
+    // 到手，此时补一次空间选择；规则同登录流程，无 ?tenant=/无历史偏好
+    // 默认进共享空间。非 CK 构建不受影响。
+    if (isCKnowledgeConsole()) {
+      const selection = resolveConsoleBootSelection({
+        activeTenantId: tenant?.id ?? null,
+        activeTenantName: tenant?.name ?? null,
+        homeTenantId: user.tenant_id ?? null,
+        memberships,
+      })
+      authStore.setSelectedTenant(selection.id, selection.name)
+    }
 
     return true
   } catch {

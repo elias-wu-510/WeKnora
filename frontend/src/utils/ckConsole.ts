@@ -33,6 +33,28 @@ export function afterLoginPath(hasValidTenant: boolean): string {
  */
 const PREFERRED_TENANT_KEY = 'ck.preferred-tenant'
 
+/**
+ * 独立入口的默认共享空间。
+ *
+ * 从 Senior AI 嵌入打开时宿主会带 `?tenant=<id>`；但用户直接访问
+ * `/c-knowledge/` 完成 OIDC 登录时地址上没有任何提示，引擎会把活跃空间
+ * 落回个人空间，管理台就显示「全部 0」。C-Knowledge 的知识库都放在共享
+ * 空间，因此这里提供构建期默认值：只有在该账号确实是成员时才采用，
+ * 避免服务端 `insufficient permissions` 403。
+ */
+export const CK_DEFAULT_TENANT: number = (() => {
+  const raw = String(import.meta.env.VITE_CK_DEFAULT_TENANT || '10000').trim()
+  const id = Number(raw)
+  return Number.isInteger(id) && id > 0 ? id : 10000
+})()
+
+/** 把后端/宿主给的字符串或数字租户 id 归一化成正整数，否则 null。 */
+function toTenantId(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const id = Number(value)
+  return Number.isInteger(id) && id > 0 ? id : null
+}
+
 export function rememberPreferredTenant(id: number): void {
   if (Number.isInteger(id) && id > 0) {
     try {
@@ -90,6 +112,11 @@ export function resolveTenantSelection(input: {
     const stored = Number(localStorage.getItem('weknora_selected_tenant_id') || '')
     const fromStore = Number.isInteger(stored) && stored > 0 ? known(stored) : null
     if (fromStore) return fromStore
+    // 独立入口（无 ?tenant=、无历史偏好）的兜底：默认进共享空间。
+    // 这里必须严格要求成员关系命中，不能用 known() 的「无成员列表也信任」
+    // 分支，否则非成员会带着 X-Tenant-ID 触发服务端 403。
+    const shared = (memberships || []).find(m => Number(m.tenant_id) === CK_DEFAULT_TENANT)
+    if (shared) return { id: CK_DEFAULT_TENANT, name: shared.tenant_name ?? null }
   }
   if (
     Number.isFinite(activeTenantId) &&
@@ -99,4 +126,26 @@ export function resolveTenantSelection(input: {
     return { id: activeTenantId as number, name: activeTenantName ?? null }
   }
   return { id: null, name: null }
+}
+
+/**
+ * 启动/登录兜底：成员关系已知后同步一次控制台空间选择。
+ *
+ * 只在 C-Knowledge 控制台生效，官方引擎站点调用方需自行跳过。与
+ * `resolveTenantSelection` 的区别仅是接受后端原样的字符串 id 并做归一化，
+ * 供 main.ts / 路由守卫在 `/auth/me` 返回后直接调用。
+ */
+export function resolveConsoleBootSelection(input: {
+  activeTenantId?: number | string | null
+  activeTenantName?: string | null
+  homeTenantId?: number | string | null
+  memberships?: TenantMembershipLike[] | null
+}): { id: number | null; name: string | null } {
+  if (!isCKnowledgeConsole()) return { id: null, name: null }
+  return resolveTenantSelection({
+    activeTenantId: toTenantId(input.activeTenantId),
+    activeTenantName: input.activeTenantName ?? null,
+    homeTenantId: toTenantId(input.homeTenantId),
+    memberships: input.memberships,
+  })
 }
