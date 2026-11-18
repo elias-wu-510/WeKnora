@@ -86,9 +86,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { listKnowledgeBases } from '@/api/knowledge-base'
+import { useAuthStore } from '@/stores/auth'
 
 interface CkKnowledgeBase {
   id: string
@@ -160,6 +161,16 @@ function goManage() {
 }
 
 onMounted(load)
+
+// 独立入口登录是在 SPA 启动后才拿到 token 的：首屏那次列表请求可能还没带上 X-Tenant-ID
+// （落到个人空间 → 0 个库）。等共享空间被选定时补拉一次，避免「标题写着共享空间、列表却是空的」。
+const authStore = useAuthStore()
+watch(
+  () => authStore.selectedTenantId,
+  (id, previous) => {
+    if (id && id !== previous) void load()
+  },
+)
 </script>
 
 <style scoped lang="less">
