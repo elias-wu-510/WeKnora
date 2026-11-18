@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <title>WeKnora Embed</title>
-    <script>if (location.pathname.indexOf('/c-knowledge/') === 0) document.title = 'C-Knowledge';</script>
+    <script>if ((() => { const h = location.hostname; return h === 'ck.c-smart.hk' || h === 'ck-test.c-smart.hk' || location.pathname.indexOf('/c-knowledge/') === 0 || location.pathname.indexOf('/c-knowledge-test/') === 0 })()) document.title = 'C-Knowledge';</script>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, minimal-ui">
     <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">

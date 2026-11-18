@@ -9,9 +9,19 @@
  * 只用构建期 base 判断，避免运行时被 `?embed=1` 等参数误伤（嵌入聊天
  * 页与嵌入管理台共用同一个 base，品牌替换对两者都成立）。
  */
+export const CK_HOSTS = ['ck.c-smart.hk', 'ck-test.c-smart.hk'] as const
+
+/** 是否跑在 C-Knowledge 自己的域名上（独立子域形态，构建 base 为 `/`）。 */
+export function isCKnowledgeHost(): boolean {
+  if (typeof window === 'undefined') return false
+  return (CK_HOSTS as readonly string[]).includes(window.location.hostname)
+}
+
 export function isCKnowledgeConsole(): boolean {
   const base = (import.meta.env.BASE_URL || '/').replace(/\/+$/, '')
-  return base === '/c-knowledge'
+  // 子路径形态（/c-knowledge/、/c-knowledge-test/）或独立域名形态都算 CK。
+  if (base === '/c-knowledge' || base === '/c-knowledge-test') return true
+  return isCKnowledgeHost()
 }
 
 /** C-Knowledge 控制台自有首页；引擎默认首页是知识库列表。 */

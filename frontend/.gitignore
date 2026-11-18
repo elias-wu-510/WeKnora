@@ -12,6 +12,7 @@ node_modules
 dist
 # C-Knowledge 白标构建产物（vite build --outDir dist-c-knowledge）
 dist-c-knowledge
+dist-c-knowledge-subdomain
 dist-ssr
 coverage
 *.local
