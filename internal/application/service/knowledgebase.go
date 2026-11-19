@@ -52,6 +52,9 @@ type knowledgeBaseService struct {
 	audit           interfaces.AuditLogService
 	resourceCatalog interfaces.ResourceCatalog
 	wikiRepo        interfaces.WikiPageRepository
+	// tagRepo resolves caller-supplied tag filters into knowledge IDs; see
+	// resolveTagFilterKnowledgeIDs in knowledgebase_search.go.
+	tagRepo interfaces.KnowledgeTagRepository
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -76,6 +79,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	audit interfaces.AuditLogService,
 	resourceCatalog interfaces.ResourceCatalog,
 	wikiRepo interfaces.WikiPageRepository,
+	tagRepo interfaces.KnowledgeTagRepository,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
 		repo:            repo,
@@ -99,6 +103,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		audit:           audit,
 		resourceCatalog: resourceCatalog,
 		wikiRepo:        wikiRepo,
+		tagRepo:         tagRepo,
 	}
 }
 

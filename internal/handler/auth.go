@@ -347,6 +347,22 @@ func setOIDCNonceCookie(c *gin.Context, nonce string) {
 	c.SetCookie(oidcNonceCookieName, nonce, oidcNonceCookieMaxAge, "/", "", secure, true)
 }
 
+// webBasePath reports the site-root prefix this deployment is mounted under
+// (for example "/c-knowledge"), as announced by the reverse proxy via
+// X-Forwarded-Prefix. The engine is also served at the site root, so a
+// missing header or "/" means "no prefix" and every path stays unchanged.
+func webBasePath(c *gin.Context) string {
+	raw := strings.TrimSpace(c.GetHeader("X-Forwarded-Prefix"))
+	if raw == "" || raw == "/" {
+		return ""
+	}
+	if !strings.HasPrefix(raw, "/") || strings.Contains(raw, "..") ||
+		strings.ContainsAny(raw, "?#\\") {
+		return ""
+	}
+	return strings.TrimRight(raw, "/")
+}
+
 // oidcCallbackURL derives the absolute /auth/oidc/callback URL from the
 // request's own origin (scheme + host), so external platforms can deep-link
 // to /auth/oidc/start without supplying a redirect_uri.
@@ -355,7 +371,7 @@ func oidcCallbackURL(c *gin.Context) string {
 	if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
 		scheme = "https"
 	}
-	return scheme + "://" + c.Request.Host + "/api/v1/auth/oidc/callback"
+	return scheme + "://" + c.Request.Host + webBasePath(c) + "/api/v1/auth/oidc/callback"
 }
 
 // OIDCStart godoc
@@ -416,7 +432,10 @@ func (h *AuthHandler) GetOIDCConfig(c *gin.Context) {
 // @Router       /auth/oidc/callback [get]
 func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 	ctx := c.Request.Context()
-	frontendRedirectURI := "/"
+	// The SPA may be served under a path prefix (C-Knowledge at
+	// /c-knowledge/); the post-login bounce has to land inside that prefix,
+	// otherwise the auth payload in the hash is dropped on the site root.
+	frontendRedirectURI := webBasePath(c) + "/"
 
 	if providerError := strings.TrimSpace(c.Query("error")); providerError != "" {
 		redirectURL := frontendRedirectURI + "#oidc_error=" + urlQueryEscape(providerError)
@@ -836,6 +855,7 @@ func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 		"success":                  true,
 		"registration_mode":        mode,
 		"complex_password_enabled": complexPasswordEnabled,
+		"feishu_enabled":           h.feishuEnabled(),
 	})
 }
 

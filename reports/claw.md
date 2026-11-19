@@ -1,0 +1,2 @@
+- [2026-10-02] 在 feat/aliyun-flat-rerank 修复阿里云 qwen3-rerank 平铺接口路径，部署至 WeKnora-app 并通过生产测试连接。
+- [2026-10-02] 在 feat/aliyun-flat-rerank 为智能体网络搜索空选单增加设置入口与刷新操作，给管理员工作空间配置并验证默认 DuckDuckGo，部署 C-Knowledge 前端。

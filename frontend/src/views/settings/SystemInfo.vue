@@ -22,6 +22,29 @@
 
     <!-- Content -->
     <div v-else class="settings-group">
+      <!-- C-Knowledge：白标产品只露出自己的身份与内部版本号 -->
+      <template v-if="isCk">
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>产品</label>
+            <p class="desc">香港建筑行业共享知识库管理台</p>
+          </div>
+          <div class="setting-control">
+            <span class="info-value">C-Knowledge · 由 Senior AI 维护</span>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>内部版本</label>
+            <p class="desc">当前部署的内部构建号</p>
+          </div>
+          <div class="setting-control">
+            <span class="info-value">{{ frontendVersion }}</span>
+          </div>
+        </div>
+      </template>
+
+      <template v-if="!isCk">
       <!-- System version -->
       <div class="setting-row">
         <div class="setting-info">
@@ -132,6 +155,8 @@
         </div>
       </div>
 
+      </template>
+
       <!-- DB migration error: full-width banner under the row -->
       <div v-if="systemInfo?.db_migration_error" class="setting-row migration-error-row">
         <t-alert theme="error" :title="$t('system.dbMigrationFailedTitle')" style="width: 100%;">
@@ -139,24 +164,32 @@
             <p class="migration-error-desc">{{ $t('system.dbMigrationFailedDesc') }}</p>
             <pre class="migration-error-detail">{{ systemInfo.db_migration_error }}</pre>
             <div class="migration-error-actions">
-              <t-link
-                theme="primary"
-                :href="troubleshootingDocsURL"
-                target="_blank"
-                rel="noopener noreferrer"
-              >{{ $t('system.dbMigrationViewDocs') }}</t-link>
-              <span class="migration-error-actions-sep">·</span>
-              <t-link
-                theme="primary"
-                :href="reportIssueURL"
-                target="_blank"
-                rel="noopener noreferrer"
-              >{{ $t('system.dbMigrationReportIssue') }}</t-link>
+              <template v-if="isCk">
+                <t-link theme="primary" :href="ckSupportURL" target="_blank" rel="noopener noreferrer">
+                  联系 Senior AI 支持
+                </t-link>
+              </template>
+              <template v-else>
+                <t-link
+                  theme="primary"
+                  :href="troubleshootingDocsURL"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >{{ $t('system.dbMigrationViewDocs') }}</t-link>
+                <span class="migration-error-actions-sep">·</span>
+                <t-link
+                  theme="primary"
+                  :href="reportIssueURL"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >{{ $t('system.dbMigrationReportIssue') }}</t-link>
+              </template>
             </div>
           </template>
         </t-alert>
       </div>
 
+      <template v-if="!isCk">
       <!-- Keyword Index Engine -->
       <div class="setting-row">
         <div class="setting-info">
@@ -189,6 +222,7 @@
           <span class="info-value">{{ systemInfo?.graph_database_engine || $t('system.unknown') }}</span>
         </div>
       </div>
+      </template>
 
     </div>
   </div>
@@ -200,8 +234,11 @@ import type { SystemInfo } from '@/api/system'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useI18n } from 'vue-i18n'
 import { docsUrl } from '@/utils/docsUrl'
+import { CK_SUPPORT_URL, isCKnowledgeConsole } from '@/utils/ckConsole'
 
 const { t, locale } = useI18n()
+const isCk = isCKnowledgeConsole()
+const ckSupportURL = CK_SUPPORT_URL
 
 // Reactive state
 const editorResources = useEditorResourcesStore()

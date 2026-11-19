@@ -7,15 +7,21 @@
 // 用一次 full navigation 把所有 store / SSE / 请求都重置一遍。
 
 import { updateMyPreferences } from '@/api/auth'
+import { isCKnowledgeConsole, CK_HOME_PATH } from '@/utils/ckConsole'
+import { withAppBase } from '@/utils/basePath'
 
 const SAFE_FALLBACK_PATH = '/platform/knowledge-bases'
+const CK_SAFE_FALLBACK_PATH = CK_HOME_PATH
 
 /**
  * Return the URL to navigate to after a tenant switch. 目前始终返回 KB 列表
  * 作为登录页，保留函数签名是为了未来需要按路由做特殊处理时留个口子。
  */
 export function tenantSwitchTargetPath(_currentPath: string): string {
-  return SAFE_FALLBACK_PATH
+  // C-Knowledge 控制台没有 /platform/knowledge-bases 这个对外地址（nginx 只
+  // 代理 /c-knowledge/），硬跳过去会 404；且它的首页本来就是 /home。
+  const path = isCKnowledgeConsole() ? CK_SAFE_FALLBACK_PATH : SAFE_FALLBACK_PATH
+  return withAppBase(path)
 }
 
 /**

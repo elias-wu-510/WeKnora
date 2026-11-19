@@ -23,6 +23,10 @@ func (p *PluginMerge) mergeSequentialChunks(
 	if len(chunks) == 0 {
 		return nil
 	}
+	// Capture each original body before the first merge mutates Content.
+	for _, chunk := range chunks {
+		ensureCitationEvidence(chunk)
+	}
 
 	type mergedGroup struct {
 		result    *types.SearchResult
@@ -156,14 +160,79 @@ func classifyMerge(lastChunk *types.SearchResult, lastIndex int, current *types.
 // to SubChunkID (deduplicated) and merges its ImageInfo, warning on failure.
 // warnKey distinguishes merge contexts in pipeline diagnostics.
 func recordMergedChild(ctx context.Context, knowledgeID string, target, source *types.SearchResult, warnKey string) {
+	ensureCitationEvidence(target)
+	ensureCitationEvidence(source)
+	target.ContextHeader = mergeContextHeaders(target.ContextHeader, source.ContextHeader)
+	for _, evidence := range source.CitationEvidence {
+		appendCitationEvidence(target, evidence)
+	}
 	if !containsID(target.SubChunkID, source.ID) {
 		target.SubChunkID = append(target.SubChunkID, source.ID)
+	}
+	for _, id := range source.SubChunkID {
+		if id != target.ID && !containsID(target.SubChunkID, id) {
+			target.SubChunkID = append(target.SubChunkID, id)
+		}
+	}
+	for _, evidence := range source.CitationEvidence {
+		if evidence.ChunkID != target.ID && !containsID(target.SubChunkID, evidence.ChunkID) {
+			target.SubChunkID = append(target.SubChunkID, evidence.ChunkID)
+		}
 	}
 	if err := mergeImageInfo(ctx, target, source); err != nil {
 		pipelineWarn(ctx, "Merge", warnKey, map[string]any{
 			"knowledge_id": knowledgeID,
 			"error":        err.Error(),
 		})
+	}
+}
+
+func ensureCitationEvidence(result *types.SearchResult) {
+	if result == nil || result.CitationEvidence != nil || result.ID == "" || result.Content == "" {
+		return
+	}
+	// Persisted history may contain a merged body without its original members.
+	// Do not relabel that body as the leading chunk's original content.
+	if result.ContentRewritten || len(result.SubChunkID) > 0 {
+		result.CitationEvidence = []types.CitationEvidence{}
+		return
+	}
+	result.CitationEvidence = []types.CitationEvidence{{
+		ChunkID:         result.ID,
+		KnowledgeID:     result.KnowledgeID,
+		KnowledgeBaseID: result.KnowledgeBaseID,
+		DocumentTitle:   firstPipelineTitle(result),
+		ChunkIndex:      result.ChunkIndex,
+		ChunkType:       result.ChunkType,
+		Content:         result.Content,
+	}}
+}
+
+func appendCitationEvidence(result *types.SearchResult, evidence types.CitationEvidence) {
+	if result == nil || evidence.ChunkID == "" || evidence.Content == "" {
+		return
+	}
+	for i := range result.CitationEvidence {
+		if result.CitationEvidence[i].ChunkID != evidence.ChunkID {
+			continue
+		}
+		if result.CitationEvidence[i].Content == "" {
+			result.CitationEvidence[i] = evidence
+		}
+		return
+	}
+	result.CitationEvidence = append(result.CitationEvidence, evidence)
+}
+
+func citationEvidenceFromChunk(result *types.SearchResult, chunkID, content, chunkType string, chunkIndex int) types.CitationEvidence {
+	return types.CitationEvidence{
+		ChunkID:         chunkID,
+		KnowledgeID:     result.KnowledgeID,
+		KnowledgeBaseID: result.KnowledgeBaseID,
+		DocumentTitle:   firstPipelineTitle(result),
+		ChunkIndex:      chunkIndex,
+		ChunkType:       chunkType,
+		Content:         content,
 	}
 }
 

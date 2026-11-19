@@ -1072,17 +1072,22 @@ func (s *userService) clearLastActiveTenantPreference(ctx context.Context, user 
 // GenerateTokens and SwitchTenant. It encodes activeTenantID into the
 // access token's tenant_id claim so the auth middleware scopes future
 // requests there.
+const (
+	accessTokenTTL  = 30 * 24 * time.Hour
+	refreshTokenTTL = 60 * 24 * time.Hour
+)
+
 func (s *userService) generateTokensForTenant(
 	ctx context.Context,
 	user *types.User,
 	activeTenantID uint64,
 ) (accessToken, refreshToken string, err error) {
-	// Generate access token (expires in 24 hours)
+	// Generate access token (expires in 30 days; self-hosted internal tool)
 	accessClaims := jwt.MapClaims{
 		"user_id":   user.ID,
 		"email":     user.Email,
 		"tenant_id": activeTenantID,
-		"exp":       time.Now().Add(24 * time.Hour).Unix(),
+		"exp":       time.Now().Add(accessTokenTTL).Unix(),
 		"iat":       time.Now().Unix(),
 		"type":      "access",
 	}
@@ -1093,10 +1098,10 @@ func (s *userService) generateTokensForTenant(
 		return "", "", err
 	}
 
-	// Generate refresh token (expires in 7 days)
+	// Generate refresh token (expires in 60 days)
 	refreshClaims := jwt.MapClaims{
 		"user_id": user.ID,
-		"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(),
+		"exp":     time.Now().Add(refreshTokenTTL).Unix(),
 		"iat":     time.Now().Unix(),
 		"type":    "refresh",
 	}
@@ -1113,7 +1118,7 @@ func (s *userService) generateTokensForTenant(
 		UserID:    user.ID,
 		Token:     accessToken,
 		TokenType: "access_token",
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt: time.Now().Add(accessTokenTTL),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -1123,7 +1128,7 @@ func (s *userService) generateTokensForTenant(
 		UserID:    user.ID,
 		Token:     refreshToken,
 		TokenType: "refresh_token",
-		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+		ExpiresAt: time.Now().Add(refreshTokenTTL),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}

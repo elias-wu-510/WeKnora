@@ -1,6 +1,6 @@
 <template>
     <div class="main" ref="dropzone" :style="{ '--sidebar-width': `${uiStore.sidebarDisplayWidth}px` }">
-        <Menu></Menu>
+        <Menu v-if="!embeddedView"></Menu>
         <div v-if="isRouterAlive" class="platform-route-outlet">
             <RouterView />
         </div>
@@ -16,12 +16,14 @@
         <GlobalInvitationBell />
         <!-- 知识库文件上传进度浮层：上传队列放在 store 里，切换页面不中断 -->
         <UploadTasksPanel />
-        <!-- 带遮罩层的新手引导：首次进入自动开启，可从用户菜单顶部昵称旁帮助按钮重新打开 -->
-        <NewUserGuide />
+        <!-- 带遮罩层的新手引导：首次进入自动开启，可从用户菜单顶部昵称旁帮助按钮重新打开。
+             C-Knowledge 控制台是白标产品，不展示引擎的 WeKnora 引导。 -->
+        <NewUserGuide v-if="!isCkConsole" />
     </div>
 </template>
 <script setup lang="ts">
 import Menu from '@/components/menu.vue'
+import { hideUpstreamBrandLinks, isCKnowledgeConsole } from '@/utils/ckConsole'
 import { ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
 import UploadMask from '@/components/upload-mask.vue'
@@ -37,11 +39,15 @@ import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { collectDroppedFiles } from './collectDroppedFiles'
+import { isEmbeddedView } from '@/utils/embeddedView'
 
+const isCkConsole = isCKnowledgeConsole()
 const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
 const uiStore = useUIStore();
+// 被 Senior AI 以 iframe 嵌入时（?embed=1）不渲染左侧菜单，内容区独占整宽。
+const embeddedView = isEmbeddedView();
 let ismask = ref(false)
 const { t } = useI18n();
 
@@ -194,8 +200,26 @@ const handleGlobalDrop = async (event: DragEvent) => {
     }));
 }
 
+// 窄屏（手机 / 窄窗口）自动把侧栏收成图标栏：控制台要能在手机上打开，
+// 引擎原有布局最小 600px，窄屏会整页横向溢出。
+const compactSidebarQuery = typeof window !== 'undefined' ? window.matchMedia('(max-width: 900px)') : null
+
+function applyViewportSidebar() {
+    if (embeddedView || !compactSidebarQuery) return
+    // 只改运行时状态、不写 localStorage：手机访问不应覆盖桌面端的展开/收起偏好。
+    uiStore.sidebarCollapsed = compactSidebarQuery.matches
+        ? true
+        : localStorage.getItem('sidebar_collapsed') === 'true'
+}
+
 // 组件挂载时添加全局事件监听器
+let stopHidingUpstreamLinks: (() => void) | null = null
+
 onMounted(() => {
+    applyViewportSidebar()
+    // 白标：隐藏仍然指向原厂仓库的文档/提单入口
+    stopHidingUpstreamLinks = hideUpstreamBrandLinks()
+    compactSidebarQuery?.addEventListener('change', applyViewportSidebar)
     document.addEventListener('dragenter', handleGlobalDragEnter, true);
     document.addEventListener('dragover', handleGlobalDragOver, true);
     document.addEventListener('dragleave', handleGlobalDragLeave, true);
@@ -231,6 +255,9 @@ function maybeOpenCmdkFromRoute() {
 
 // 组件卸载时移除全局事件监听器
 onUnmounted(() => {
+    stopHidingUpstreamLinks?.()
+    stopHidingUpstreamLinks = null
+    compactSidebarQuery?.removeEventListener('change', applyViewportSidebar)
     document.removeEventListener('dragenter', handleGlobalDragEnter, true);
     document.removeEventListener('dragover', handleGlobalDragOver, true);
     document.removeEventListener('dragleave', handleGlobalDragLeave, true);
@@ -256,6 +283,13 @@ onUnmounted(() => {
     min-height: 0;
     /* 统一整页背景，让左侧菜单与右侧内容区视觉连贯 */
     background: var(--td-bg-color-container);
+}
+
+/* 窄屏：侧栏收成图标栏后不再需要 600px 下限，否则整页仍会横向溢出 */
+@media (max-width: 900px) {
+    .main {
+        min-width: 0;
+    }
 }
 
 /* 右侧路由区：占满剩余宽度与整列高度，并把 min-height:0 传给子页面以便内部 flex 滚动 */

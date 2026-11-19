@@ -304,17 +304,21 @@ func buildDocumentHeader(results []*types.SearchResult) string {
 // getEnrichedPassageForChat 合并Content和ImageInfo的文本内容，为聊天消息准备
 func getEnrichedPassageForChat(ctx context.Context, result *types.SearchResult) string {
 	// 如果没有图片信息，直接返回内容
-	if result.Content == "" && result.ImageInfo == "" {
+	if result.Content == "" && result.ImageInfo == "" && result.ContextHeader == "" {
 		return ""
+	}
+	content := result.Content
+	if result.ContextHeader != "" {
+		content = searchutil.JoinChunkContent(result.ContextHeader, content, "\n\n")
 	}
 
 	// 如果只有内容，没有图片信息
 	if result.ImageInfo == "" {
-		return result.Content
+		return content
 	}
 
 	// 处理图片信息并与内容合并
-	return enrichContentWithImageInfo(ctx, result.Content, result.ImageInfo)
+	return enrichContentWithImageInfo(ctx, content, result.ImageInfo)
 }
 
 // enrichContentWithImageInfo delegates to the shared searchutil implementation.

@@ -75,6 +75,7 @@ import MyInvitationsDialog from '@/components/MyInvitationsDialog.vue'
 import { logout as logoutApi } from '@/api/auth'
 import type { TenantInfo } from '@/api/tenant'
 import { useAuthStore } from '@/stores/auth'
+import { afterLoginPath } from '@/utils/ckConsole'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -105,14 +106,14 @@ onMounted(async () => {
 watch(
   () => authStore.hasValidTenant,
   (ready) => {
-    if (ready) router.replace('/platform/knowledge-bases')
+    if (ready) router.replace(afterLoginPath(true))
   },
 )
 
 async function onTenantCreated(tenant: TenantInfo) {
   await authStore.refreshFromAuthMe()
   authStore.setSelectedTenant(tenant.id, tenant.name)
-  await router.replace('/platform/knowledge-bases')
+  await router.replace(afterLoginPath(true))
 }
 
 async function handleLogout() {

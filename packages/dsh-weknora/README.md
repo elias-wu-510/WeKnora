@@ -58,6 +58,16 @@ For anything beyond that, override the row from your profile's `cordis.patch.yml
 A patch replaces the row's whole `config`, so restate every field you keep. Invalid configuration fails the plugin load
 with a message naming each violation, rather than failing inside the first tool call.
 
+A profile shared by sessions that hold no credential — one `acp-local` used by several clients, say — should keep the
+tools out of the keyless sessions instead of registering calls that can only answer 401. `disabled` accepts a `!!js`
+expression and is evaluated at each mount, so the row is skipped at startup:
+
+```yaml
+- id: weknora
+  disabled: !!js "!process.env.WEKNORA_API_KEY"
+  config: { ... }
+```
+
 Mounting two deployments is two rows with two prefixes:
 
 ```yaml

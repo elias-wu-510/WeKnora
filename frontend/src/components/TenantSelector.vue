@@ -80,6 +80,7 @@ import {
   persistLastActiveTenantPreference,
   stashTenantSwitchToast,
 } from '@/utils/tenantSwitch'
+import { rememberUserTenantChoice } from '@/utils/ckConsole'
 import CreateTenantDialog from '@/components/CreateTenantDialog.vue'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 
@@ -180,6 +181,7 @@ const selectTenant = (tenantId: number) => {
       || null
     : null
   authStore.setSelectedTenant(tenantId, selectedTenant?.name || homeNameFallback || null)
+  rememberUserTenantChoice(tenantId)
   closeDropdown()
   const displayName = selectedTenant?.name
     || homeNameFallback

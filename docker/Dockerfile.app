@@ -72,7 +72,13 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     if [ "$WITH_ANYDOC" = "1" ]; then \
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
             | sh -s -- -y --profile minimal --default-toolchain stable && \
-        ./scripts/build-anydoc-lib.sh; \
+        ./scripts/build-anydoc-lib.sh && \
+        # Go 1.26's linker refuses object files that still carry LLVM LTO
+        # bitcode ("disallowed LTO section \".llvmbc\""); the anydoc archive
+        # is built with thin-LTO, so strip the bitcode before linking.
+        objcopy --remove-section=.llvmbc --remove-section=.llvmcmd \
+            --remove-section=.llvm_addrsig \
+            third_party/anydoc-go/lib/linux_amd64_gnu/libanydoc_go.a; \
     fi
 
 # Build the application with version info

@@ -44,7 +44,8 @@ func docChunks(chunks ...*types.SearchResult) []*types.SearchResult {
 func TestGroupAndMerge_TrustedOverlapTrimsAndExtendsRange(t *testing.T) {
 	// 20-rune real overlap between two trusted chunks: the merged body must
 	// contain the overlap exactly once and extend the result range.
-	first := trustedResult("c1", 1, 0, 100, rangeText('a', 80)+rangeText('b', 20))
+	firstBody := rangeText('a', 80) + rangeText('b', 20)
+	first := trustedResult("c1", 1, 0, 100, firstBody)
 	second := trustedResult("c2", 2, 80, 200, rangeText('b', 20)+rangeText('c', 100))
 
 	results := mergeGrouped(docChunks(first, second))
@@ -53,6 +54,22 @@ func TestGroupAndMerge_TrustedOverlapTrimsAndExtendsRange(t *testing.T) {
 	assert.Equal(t, rangeText('a', 80)+rangeText('b', 20)+rangeText('c', 100), results[0].Content)
 	assert.Equal(t, 200, results[0].EndAt, "merged range must extend to the second chunk")
 	assert.ElementsMatch(t, []string{"c2"}, results[0].SubChunkID)
+	ids := []string{results[0].CitationEvidence[0].ChunkID, results[0].CitationEvidence[1].ChunkID}
+	require.ElementsMatch(t, []string{"c1", "c2"}, ids)
+	for _, evidence := range results[0].CitationEvidence {
+		if evidence.ChunkID == "c1" {
+			require.Equal(t, firstBody, evidence.Content)
+		}
+	}
+}
+
+func TestGroupAndMerge_DoesNotRelabelPersistedMergedContentAsOriginal(t *testing.T) {
+	legacy := &types.SearchResult{
+		ID: "legacy", KnowledgeID: "doc", ChunkType: "text", Content: "combined content",
+		ContentRewritten: true, SubChunkID: []string{"member"},
+	}
+	ensureCitationEvidence(legacy)
+	require.Empty(t, legacy.CitationEvidence)
 }
 
 func TestGroupAndMerge_TrustedOverlapBeyondTextSearchWindow(t *testing.T) {

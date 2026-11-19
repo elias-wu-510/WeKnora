@@ -56,6 +56,15 @@ dsh web
 patch 是整块替换该行的 `config`，所以要保留的字段需要一并写出。配置不合法会在插件加载阶段失败，并逐条列出问题，而不是等到
 模型第一次调用工具时才报错。
 
+如果一个 profile 同时被有凭据和没有凭据的会话共用（例如多个客户端共用一个 `acp-local`），应该让没有 key 的一侧在启动期直接
+跳过这一行，而不是注册出只会返回 401 的工具。`disabled` 接受 `!!js` 表达式，每次挂载时求值：
+
+```yaml
+- id: weknora
+  disabled: !!js "!process.env.WEKNORA_API_KEY"
+  config: { ... }
+```
+
 同时挂两个部署，就是两行加两个前缀：
 
 ```yaml

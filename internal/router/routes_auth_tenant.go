@@ -222,6 +222,10 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rba
 	r.GET("/auth/oidc/callback", handler.OIDCRedirectCallback)
 	// /auth/oidc/start：直连 302 跳转到 OIDC 提供方，供前端无法走 JS 拉取 URL 的场景直接发起登录
 	r.GET("/auth/oidc/start", handler.OIDCStart)
+	// C-Knowledge 直连飞书（Lark）登录。未配置 app_id/app_secret 时两个
+	// 端点都返回 404，前端通过 /auth/config 的 feishu_enabled 隐藏入口。
+	r.GET("/auth/feishu/start", handler.FeishuStart)
+	r.GET("/auth/feishu/callback", handler.FeishuCallback)
 	r.POST("/auth/refresh", handler.RefreshToken)
 	r.GET("/auth/validate", handler.ValidateToken)
 	r.POST("/auth/logout", handler.Logout)

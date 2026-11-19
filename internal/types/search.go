@@ -180,6 +180,8 @@ type SearchResult struct {
 	ChunkType string `json:"chunk_type"`
 	// 父 Chunk ID
 	ParentChunkID string `json:"parent_chunk_id"`
+	// ContextHeader is the request-local heading breadcrumb carried from the indexed chunk.
+	ContextHeader string `json:"-" gorm:"-"`
 	// 图片信息 (JSON 格式)
 	ImageInfo string `json:"image_info"`
 
@@ -233,6 +235,24 @@ type SearchResult struct {
 	// longer describe the body. Internal only: used by the merge pipeline,
 	// never serialized.
 	ContentRewritten bool `json:"-"`
+
+	// CitationEvidence keeps the request-local source chunks that contributed
+	// to Content after parent/neighbor expansion and sequential merging. It is
+	// deliberately excluded from JSON persistence and GORM schema mapping.
+	CitationEvidence []CitationEvidence `json:"-" gorm:"-"`
+}
+
+// CitationEvidence is one original chunk whose content contributed to a
+// SearchResult shown to the model. It exists only for request-scoped citation
+// mapping; it is not persisted with messages or chunks.
+type CitationEvidence struct {
+	ChunkID         string
+	KnowledgeID     string
+	KnowledgeBaseID string
+	DocumentTitle   string
+	ChunkIndex      int
+	ChunkType       string
+	Content         string
 }
 
 // SearchParams represents the search parameters

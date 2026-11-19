@@ -33,6 +33,129 @@ func TestRegistryChunkAliasIsStableAndExpandsCanonicalCitation(t *testing.T) {
 	)
 }
 
+func TestMergedCitationMapsQuantitiesToOriginalRetrievedMembers(t *testing.T) {
+	registry := newSourceRegistry()
+	registry.RegisterSearchResults([]*types.SearchResult{{
+		ID: "merged", KnowledgeID: "doc", KnowledgeBaseID: "kb", KnowledgeTitle: "Specification",
+		ChunkType: types.ChunkTypeText, Content: "The limit changed from 3,000 kPa to 4,500 kPa.",
+		CitationEvidence: []types.CitationEvidence{
+			{ChunkID: "member-old", KnowledgeID: "doc", KnowledgeBaseID: "kb", DocumentTitle: "Specification", ChunkType: types.ChunkTypeText, Content: "Original limit: 3000 kPa."},
+			{ChunkID: "member-new", KnowledgeID: "doc", KnowledgeBaseID: "kb", DocumentTitle: "Specification", ChunkType: types.ChunkTypeText, Content: "Revised limit: 4500 kPa."},
+		},
+	}})
+
+	got := registry.ExpandText(`The limit changed from 3,000 kPa to 4,500 kPa. <ref id="c1"/>`)
+	require.Contains(t, got, `chunk_id="member-old"`)
+	require.Contains(t, got, `chunk_id="member-new"`)
+	require.NotContains(t, got, `chunk_id="merged"`)
+}
+
+func TestCitationPartialParallelFactsRetainUnresolvedReference(t *testing.T) {
+	registry := newSourceRegistry()
+	registry.RegisterSearchResults([]*types.SearchResult{{
+		ID: "merged", KnowledgeID: "doc", KnowledgeBaseID: "kb", KnowledgeTitle: "Doc",
+		ChunkType: types.ChunkTypeText, Content: "Limits are 10 mm and 20 mm.",
+		CitationEvidence: []types.CitationEvidence{{
+			ChunkID: "member-one", KnowledgeID: "doc", KnowledgeBaseID: "kb", DocumentTitle: "Doc",
+			ChunkType: types.ChunkTypeText, Content: "The first limit is 10 mm.",
+		}},
+	}})
+	got := registry.ExpandText(`Limits are 10 mm and 20 mm. <ref id="c1"/>`)
+	require.Contains(t, got, `chunk_id="merged"`)
+	require.Contains(t, got, `chunk_id="member-one"`)
+}
+
+func TestCitationQuantityNormalizationAndClauseLevel(t *testing.T) {
+	require.Equal(t, citationNeedles("7,000 m³ and 0.50 mm"), citationNeedles("７０００立方米 and 0.5 毫米"))
+	require.Equal(t, citationNeedles("2 tonnes"), citationNeedles("2.0 t"))
+	require.Equal(t, []string{"10/200|ratio"}, citationNeedles("10 / 200"))
+	require.Equal(t, citationNeedles("Section 4.2 is relevant"), citationNeedles("第4.2節 is relevant"))
+	require.Equal(t, citationNeedles("Section 40(1) applies"), citationNeedles("第40(1)節 applies"))
+	require.NotEqual(t, citationNeedles("Section 4"), citationNeedles("Chapter 4"), "section and chapter are different levels")
+	require.Empty(t, citationNeedles("DRA2.T720.9 TEST PRESSURES and 7.262 to"))
+}
+
+func TestCitationOCRDigitSpacingMatchesDecimalAndThousands(t *testing.T) {
+	for _, pair := range [][2]string{
+		{"0.5 MPa", "0 5 MPa"},
+		{"5.0 mm", "5 0 mm"},
+		{"2,000 kg", "2 000 kg"},
+	} {
+		require.Equal(t, citationNeedles(pair[0]), citationNeedles(pair[1]), pair[1])
+	}
+}
+
+func TestCitationDoesNotUseHiddenOrDifferentKBQuantity(t *testing.T) {
+	registry := newSourceRegistry()
+	registry.RegisterSearchResults([]*types.SearchResult{
+		{ID: "visible", KnowledgeID: "doc", KnowledgeBaseID: "kb-1", KnowledgeTitle: "Doc", ChunkType: types.ChunkTypeText,
+			Content: "Visible limit is 150 mm.", CitationEvidence: []types.CitationEvidence{{
+				ChunkID: "visible", KnowledgeID: "doc", KnowledgeBaseID: "kb-1", ChunkType: types.ChunkTypeText,
+				Content: "Visible limit is 150 mm. Hidden limit is 900 mm.",
+			}}},
+		{ID: "other-kb", KnowledgeID: "doc", KnowledgeBaseID: "kb-2", KnowledgeTitle: "Other", ChunkType: types.ChunkTypeText, Content: "The limit is 900 mm."},
+	})
+
+	got := registry.ExpandText(`The limit is 900 mm. <ref id="c1"/>`)
+	require.Contains(t, got, `chunk_id="visible"`, "keep an unmatched citation visible for evaluation")
+	require.NotContains(t, got, `chunk_id="other-kb"`, "another KB cannot retarget the citation")
+	got = registry.ExpandText(`The limit is 150 mm. <ref id="c1"/>`)
+	require.Contains(t, got, `chunk_id="visible"`)
+}
+
+func TestCitationRetargetsOnlyWithinRetrievedDocumentAndKnowledgeBase(t *testing.T) {
+	registry := newSourceRegistry()
+	registry.RegisterSearchResults([]*types.SearchResult{
+		{ID: "wrong", KnowledgeID: "doc", KnowledgeBaseID: "kb", KnowledgeTitle: "Doc", ChunkType: types.ChunkTypeText, Content: "Old value: 3000 kPa."},
+		{ID: "right", KnowledgeID: "doc", KnowledgeBaseID: "kb", KnowledgeTitle: "Doc", ChunkType: types.ChunkTypeText, Content: "Revised value: 4500 kPa."},
+		{ID: "other-kb", KnowledgeID: "doc", KnowledgeBaseID: "other", KnowledgeTitle: "Doc", ChunkType: types.ChunkTypeText, Content: "Revised value: 4500 kPa."},
+		{ID: "other-doc", KnowledgeID: "other-doc", KnowledgeBaseID: "kb", KnowledgeTitle: "Other", ChunkType: types.ChunkTypeText, Content: "Revised value: 4500 kPa."},
+	})
+
+	got := registry.ExpandText(`Revised value: 4500 kPa. <ref id="c1"/>`)
+	require.Contains(t, got, `chunk_id="right"`)
+	require.NotContains(t, got, `chunk_id="other-kb"`)
+	require.NotContains(t, got, `chunk_id="other-doc"`)
+}
+
+func TestQualitativeCitationAndLegacyReferenceKeepExistingBehavior(t *testing.T) {
+	registry := newSourceRegistry()
+	registry.RegisterChunk(ChunkReference{ChunkID: "legacy", DocumentTitle: "Legacy"})
+	registry.RegisterChunk(ChunkReference{
+		ChunkID: "qualitative", KnowledgeID: "doc", KnowledgeBaseID: "kb", DocumentTitle: "Doc",
+		ChunkType: types.ChunkTypeText, Content: "A qualitative explanation.",
+	})
+
+	require.Contains(t, registry.ExpandText(`A qualitative explanation. <ref id="c2"/>`), `chunk_id="qualitative"`)
+	require.Contains(t, registry.ExpandText(`A plain historical reference <ref id="c1"/>`), `chunk_id="legacy"`)
+}
+
+func TestNumericCitationIsNotRetargetedToNonTextSource(t *testing.T) {
+	registry := newSourceRegistry()
+	registry.RegisterSearchResults([]*types.SearchResult{{
+		ID: "summary", KnowledgeID: "doc", KnowledgeBaseID: "kb", KnowledgeTitle: "Doc",
+		ChunkType: types.ChunkTypeSummary, Content: "The limit is 150 mm.",
+	}})
+	got := registry.ExpandText(`The limit is 150 mm. <ref id="c1"/>`)
+	require.Contains(t, got, `chunk_id="summary"`, "retain the unresolved source rather than hide the failure")
+}
+
+func TestCitationStreamKeepsInlineContextAndNeverRepeatsFlushedText(t *testing.T) {
+	registry := newSourceRegistry()
+	registry.RegisterChunk(ChunkReference{
+		ChunkID: "chunk-1", KnowledgeID: "doc", KnowledgeBaseID: "kb", DocumentTitle: "Doc",
+		ChunkType: types.ChunkTypeText, Content: "Limit is 7,000 mm.",
+	})
+	expander := newCitationStreamExpander(registry)
+	first := expander.Feed(`Limit is 7,000 mm. <ref id="`)
+	second := expander.Feed(`c1"/>`)
+	last := expander.Flush()
+	joined := first + second + last
+	require.Contains(t, joined, `chunk_id="chunk-1"`)
+	require.Equal(t, 1, strings.Count(joined, "Limit is 7,000 mm."))
+	require.Empty(t, last)
+}
+
 func TestRegisterDoesNotTreatModelAliasesAsNewDurableIdentities(t *testing.T) {
 	r := newSourceRegistry()
 	require.Equal(t, "c1", r.RegisterChunk(ChunkReference{ChunkID: "chunk-real"}))

@@ -271,6 +271,9 @@ export interface AuthConfigResponse {
   success: boolean
   registration_mode: 'self_serve' | 'invite_register' | 'invite_only' | string
   complex_password_enabled: boolean
+  // 飞书（中海通）登录是否已在后端配置。仅 C-Knowledge 控制台消费；
+  // 老版本后端不返回该字段时为 undefined，按 false 处理。
+  feishu_enabled?: boolean
 }
 
 export async function getAuthConfig(): Promise<AuthConfigResponse> {
@@ -278,7 +281,7 @@ export async function getAuthConfig(): Promise<AuthConfigResponse> {
     const response = await get('/api/v1/auth/config')
     return response as unknown as AuthConfigResponse
   } catch {
-    return { success: false, registration_mode: '', complex_password_enabled: false }
+    return { success: false, registration_mode: '', complex_password_enabled: false, feishu_enabled: false }
   }
 }
 

@@ -24,6 +24,7 @@ type Config struct {
 	Auth            *AuthConfig            `yaml:"auth"             json:"auth"`
 	Audit           *AuditConfig           `yaml:"audit"            json:"audit"`
 	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
+	FeishuAuth      *FeishuAuthConfig      `yaml:"feishu_auth"      json:"feishu_auth"`
 	Models          []ModelConfig          `yaml:"models"           json:"models"`
 	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
 	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
@@ -96,6 +97,7 @@ type ConversationConfig struct {
 	KeywordThreshold     float64        `yaml:"keyword_threshold"                json:"keyword_threshold"`
 	EmbeddingTopK        int            `yaml:"embedding_top_k"                  json:"embedding_top_k"`
 	VectorThreshold      float64        `yaml:"vector_threshold"                 json:"vector_threshold"`
+	RerankModelID        string         `yaml:"rerank_model_id"                  json:"rerank_model_id"`
 	RerankTopK           int            `yaml:"rerank_top_k"                     json:"rerank_top_k"`
 	RerankThreshold      float64        `yaml:"rerank_threshold"                 json:"rerank_threshold"`
 	FallbackStrategy     string         `yaml:"fallback_strategy"                json:"fallback_strategy"`
@@ -326,6 +328,38 @@ type OIDCAuthConfig struct {
 	JwksURI               string               `yaml:"jwks_uri"               json:"jwks_uri"`
 	Scopes                []string             `yaml:"scopes"                 json:"scopes"`
 	UserInfoMapping       *OIDCUserInfoMapping `yaml:"user_info_mapping"      json:"user_info_mapping"`
+}
+
+// FeishuAuthConfig configures the C-Knowledge direct Feishu (Lark) login.
+//
+// The feature is disabled unless both AppID and AppSecret are set, so an
+// omitted section keeps the existing OIDC/password login surface unchanged.
+// AppSecret is tagged json:"-" to keep it out of any config dump.
+type FeishuAuthConfig struct {
+	AppID     string `yaml:"app_id"     json:"app_id"`
+	AppSecret string `yaml:"app_secret" json:"-"`
+	// RedirectURI is optional. When empty the server derives the callback
+	// from the incoming request (scheme + host + X-Forwarded-Prefix), which
+	// is what the reverse-proxied C-Knowledge deployment needs.
+	RedirectURI string `yaml:"redirect_uri" json:"redirect_uri"`
+	// TenantKey, when non-empty, must match the tenant_key returned by
+	// Feishu user_info. It is a second gate on top of the app's own tenant
+	// scoping (the app only authorises members of its tenant).
+	TenantKey string `yaml:"tenant_key" json:"tenant_key"`
+	// SharedTenantID is the WeKnora workspace every Feishu identity joins.
+	// Defaults to WEKNORA_SHARED_TENANT_ID, falling back to 10000.
+	SharedTenantID uint64 `yaml:"shared_tenant_id" json:"shared_tenant_id"`
+	// DefaultRole is the tenant role granted on first join. Defaults to viewer.
+	DefaultRole string `yaml:"default_role" json:"default_role"`
+}
+
+// IsEnabled reports whether the Feishu login feature has the credentials it
+// needs. Nil-safe so callers can treat a missing section as disabled.
+func (c *FeishuAuthConfig) IsEnabled() bool {
+	if c == nil {
+		return false
+	}
+	return strings.TrimSpace(c.AppID) != "" && strings.TrimSpace(c.AppSecret) != ""
 }
 
 // PromptTemplateI18n holds localized name and description for a prompt template.
@@ -588,6 +622,7 @@ func LoadConfig() (*Config, error) {
 
 	// Validate configuration values
 	applyOIDCEnvOverrides(&cfg)
+	applyFeishuAuthOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyAuthAndTenantDefaults(&cfg)
@@ -633,6 +668,19 @@ func ValidateConfig(cfg *Config) error {
 		if strings.TrimSpace(cfg.OIDCAuth.DiscoveryURL) == "" &&
 			(strings.TrimSpace(cfg.OIDCAuth.AuthorizationEndpoint) == "" || strings.TrimSpace(cfg.OIDCAuth.TokenEndpoint) == "") {
 			errs = append(errs, "oidc_auth.discovery_url or both oidc_auth.authorization_endpoint and oidc_auth.token_endpoint are required when OIDC is enabled")
+		}
+	}
+
+	if cfg.FeishuAuth != nil && cfg.FeishuAuth.IsEnabled() {
+		if cfg.FeishuAuth.DefaultRole != "" {
+			if !types.TenantRole(cfg.FeishuAuth.DefaultRole).IsValid() {
+				errs = append(errs, fmt.Sprintf(
+					"feishu_auth.default_role must be one of owner/admin/contributor/viewer, got %q",
+					cfg.FeishuAuth.DefaultRole))
+			}
+		}
+		if cfg.FeishuAuth.SharedTenantID == 0 {
+			errs = append(errs, "feishu_auth.shared_tenant_id must be > 0")
 		}
 	}
 
@@ -759,6 +807,49 @@ func applyOIDCEnvOverrides(cfg *Config) {
 	if cfg.OIDCAuth.DiscoveryURL == "" && cfg.OIDCAuth.IssuerURL != "" {
 		cfg.OIDCAuth.DiscoveryURL = strings.TrimRight(cfg.OIDCAuth.IssuerURL, "/") + "/.well-known/openid-configuration"
 	}
+}
+
+// applyFeishuAuthOverrides applies env overrides for the C-Knowledge Feishu
+// login and fills in its optional defaults. The feature stays off unless
+// FEISHU_AUTH_APP_ID/APP_SECRET (or the yaml equivalents) are present.
+func applyFeishuAuthOverrides(cfg *Config) {
+	if cfg.FeishuAuth == nil {
+		cfg.FeishuAuth = &FeishuAuthConfig{}
+	}
+	if value := strings.TrimSpace(os.Getenv("FEISHU_AUTH_APP_ID")); value != "" {
+		cfg.FeishuAuth.AppID = value
+	}
+	if value := strings.TrimSpace(os.Getenv("FEISHU_AUTH_APP_SECRET")); value != "" {
+		cfg.FeishuAuth.AppSecret = value
+	}
+	if value := strings.TrimSpace(os.Getenv("FEISHU_AUTH_REDIRECT_URI")); value != "" {
+		cfg.FeishuAuth.RedirectURI = value
+	}
+	if value := strings.TrimSpace(os.Getenv("FEISHU_AUTH_TENANT_KEY")); value != "" {
+		cfg.FeishuAuth.TenantKey = value
+	}
+	if cfg.FeishuAuth.SharedTenantID == 0 {
+		cfg.FeishuAuth.SharedTenantID = defaultSharedTenantID()
+	}
+	if strings.TrimSpace(cfg.FeishuAuth.DefaultRole) == "" {
+		cfg.FeishuAuth.DefaultRole = string(types.TenantRoleViewer)
+	}
+}
+
+// defaultSharedTenantID resolves the workspace shared by all C-Knowledge
+// Feishu identities. Deployments set WEKNORA_SHARED_TENANT_ID; 10000 is the
+// historical production/test value and keeps existing installs working.
+func defaultSharedTenantID() uint64 {
+	const fallback uint64 = 10000
+	raw := strings.TrimSpace(os.Getenv("WEKNORA_SHARED_TENANT_ID"))
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || parsed == 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func applyKnowledgeBaseEnvOverrides(cfg *Config) {

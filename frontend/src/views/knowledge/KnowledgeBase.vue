@@ -9,6 +9,8 @@ import ContextualGuide from '@/components/ContextualGuide.vue';
 import KBInfoPopover from '@/components/KBInfoPopover.vue';
 import KBSwitcherDropdown from '@/components/KBSwitcherDropdown.vue';
 import { useUIStore } from '@/stores/ui';
+import { isCKnowledgeConsole } from '@/utils/ckConsole';
+import { MAX_FILE_SIZE_BYTES, MAX_FILE_SIZE_MB } from '@/utils';
 import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
 import { permissionCanEditKB, permissionCanManageKB } from '@/utils/kbPermission';
@@ -329,6 +331,15 @@ const canEdit = computed(() => {
   if (isOwner.value) return true;
   if (authStore.hasRole('admin')) return true;
   return orgStore.canEditKB(kbId.value, false);
+});
+
+// 上传（新增文档）比编辑/删除更宽：同空间 contributor 也可以投稿，
+// 与后端 /knowledge-bases/:id/knowledge/file 的 Contributor 闸门对齐。
+// 跨空间分享仍只认显式 grant，避免借 tenant 角色越权写别人的库。
+const canUpload = computed(() => {
+  if (canEdit.value) return true;
+  if (isViaShare.value || isFAQ.value) return false;
+  return authStore.hasRole('contributor');
 });
 
 // Can manage (delete, settings, etc.): same permission-first rule. For
@@ -1257,6 +1268,102 @@ const handleKnowledgeFileDrop = (event: CustomEvent) => {
   handleUploadSourceFiles(files);
 };
 
+// ── 首页 / 库卡片「上传资料」交接（?upload=1） ─────────────────────────
+// 从 /home 带参数进来时，等当前库信息与权限都就绪再直接打开文件选择器；
+// 打开后把 query 清掉，刷新页面不会重复弹窗。
+let uploadAutoOpenKbId: string | null = null;
+// 浏览器不允许「页面加载后无用户手势地弹系统文件选择器」，所以从首页带
+// ?upload=1 进来时先落在自建的投递面板里，由用户点「选择文件」或拖拽完成。
+const uploadEntryVisible = ref(false);
+
+const clearUploadQuery = () => {
+  if (route.query.upload !== '1') return;
+  const query = { ...route.query };
+  delete (query as any).upload;
+  void router.replace({ path: route.path, query, hash: route.hash });
+};
+
+// 同一个页面再次收到 ?upload=1（例如从首页重复点同一张卡片）也要能再次弹窗。
+watch(
+  () => route.query.upload,
+  (value) => {
+    if (value === '1') uploadAutoOpenKbId = null;
+  },
+);
+
+const maybeAutoOpenUploadPicker = async () => {
+  if (route.query.upload !== '1') return;
+  // 库信息就绪后先判权限：只读成员从首页点「上传」时给出明确提示，
+  // 并把参数清掉，避免地址栏一直挂着 ?upload=1 却什么也没发生。
+  if (!kbLoading.value && kbInfo.value && !isFAQ.value && !canUpload.value) {
+    if (uploadAutoOpenKbId !== kbId.value) {
+      uploadAutoOpenKbId = kbId.value;
+      MessagePlugin.warning('你没有该知识库的上传权限，请联系空间管理员');
+    }
+    clearUploadQuery();
+    return;
+  }
+  if (kbLoading.value || !kbInfo.value || isFAQ.value || !canUpload.value) return;
+  if (uploadAutoOpenKbId === kbId.value) return;
+  uploadAutoOpenKbId = kbId.value;
+  // 上传入口只存在于「文档」tab 的工具栏里：wiki 库带参数进来时先切回文档。
+  if (isWiki.value) activeKbTab.value = 'documents';
+  for (let attempt = 0; attempt < 3 && !uploadSourceRef.value; attempt += 1) {
+    await nextTick();
+  }
+  if (!uploadSourceRef.value) {
+    // 入口尚未渲染（极少见）；释放标记，等下次依赖变化再试。
+    uploadAutoOpenKbId = null;
+    return;
+  }
+  uploadEntryVisible.value = true;
+  clearUploadQuery();
+};
+
+// 投递面板：选择文件或拖入文件后关闭面板，接既有上传确认流程。
+const onUploadEntryDrop = (event: DragEvent) => {
+  const files = Array.from(event.dataTransfer?.files || []);
+  uploadEntryVisible.value = false;
+  if (files.length) handleUploadSourceFiles(files);
+};
+const openUploadEntryPicker = () => {
+  if (uploadSourceRef.value?.openFileDialog()) {
+    uploadEntryVisible.value = false;
+  }
+};
+
+watch(
+  [() => route.query.upload, kbLoading, canUpload, isFAQ, () => kbInfo.value?.id],
+  () => { void maybeAutoOpenUploadPicker(); },
+  { immediate: true },
+);
+
+// ── 拖拽上传的可视反馈 ──────────────────────────────────────────────
+// 真正的落盘由 platform shell 的全局 drop 处理（派发 weknora:knowledge-file-drop，
+// 本页 handleKnowledgeFileDrop 复用上传确认流程）；这里只负责遮罩与文案。
+const fileDragDepth = ref(0);
+const fileDragActive = computed(() => fileDragDepth.value > 0 && canUpload.value && !isFAQ.value);
+const dragCarriesFiles = (event: DragEvent) => {
+  const types = event.dataTransfer?.types;
+  return !!types && Array.from(types).includes('Files');
+};
+const handleKbDragEnter = (event: DragEvent) => {
+  if (!dragCarriesFiles(event) || !canUpload.value) return;
+  fileDragDepth.value += 1;
+};
+const handleKbDragOver = (event: DragEvent) => {
+  if (!dragCarriesFiles(event) || !canUpload.value) return;
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  if (fileDragDepth.value === 0) fileDragDepth.value = 1;
+};
+const handleKbDragLeave = (event: DragEvent) => {
+  if (!dragCarriesFiles(event)) return;
+  fileDragDepth.value = Math.max(0, fileDragDepth.value - 1);
+};
+const handleKbDrop = () => {
+  fileDragDepth.value = 0;
+};
+
 // Auto-open document detail when navigated with ?knowledge_id=xxx.
 // Note: this runs both when the KB page mounts with a query param AND when a
 // subsequent in-page navigation (e.g. from the global command palette) only
@@ -1676,7 +1783,25 @@ const enqueueUploads = (
     processConfig: options.processConfig,
     uploads: files.map(file => ({ file, fileName: buildUploadFileName(file, targetFolder) })),
   });
+  // 浮层已经给出进度，这里补一句「确实收下了」的即时确认，避免确认弹窗
+  // 关闭后到第一批进度出现之间有一段没有反馈的空窗。
+  MessagePlugin.success(`已加入上传队列，共 ${files.length} 个文件`);
 };
+
+// 传输失败时把文件名直接说出来：浮层可能被收起，用户仍需要知道是哪个文件失败。
+const notifiedFailedUploads = new Set<string>();
+watch(
+  () => uploadTasksStore.items.map(item => `${item.id}:${item.transfer}`).join('|'),
+  () => {
+    for (const item of uploadTasksStore.items) {
+      if (item.transfer !== 'failed' || notifiedFailedUploads.has(item.id)) continue;
+      const batch = uploadTasksStore.batches.find(entry => entry.id === item.batchId);
+      if (!batch || batch.kbId !== kbId.value) continue;
+      notifiedFailedUploads.add(item.id);
+      MessagePlugin.error(`「${item.name}」上传失败${item.error ? `：${item.error}` : ''}`);
+    }
+  },
+);
 
 const executeUrlImport = async (
   url: string,
@@ -1772,7 +1897,18 @@ const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
 const handleUploadSourceFiles = (files: File[]) => {
   if (!ensureDocumentKbReady()) return;
   if (files.length === 0) return;
-  openUploadConfirmDialog(files);
+  // 50MB 是前端容器与服务端的实际单文件上限（外层 nginx 200m 不是瓶颈）。
+  // 超限文件在选完/拖入的这一刻就拦下，避免传完后才收到一段 413 HTML。
+  const oversized = files.filter(file => file.size > MAX_FILE_SIZE_BYTES);
+  const accepted = files.filter(file => file.size <= MAX_FILE_SIZE_BYTES);
+  if (oversized.length > 0) {
+    const names = oversized.slice(0, 3).map(file => file.name).join('、');
+    MessagePlugin.warning(
+      `已跳过 ${oversized.length} 个超过 ${MAX_FILE_SIZE_MB}MB 的文件：${names}${oversized.length > 3 ? ' 等' : ''}`,
+    );
+  }
+  if (accepted.length === 0) return;
+  openUploadConfirmDialog(accepted);
 };
 
 const handleUploadSourceUrl = (url: string) => {
@@ -1799,7 +1935,8 @@ const handleOpenKBSettings = () => {
 };
 
 const handleNavigateToKbList = () => {
-  router.push('/platform/knowledge-bases');
+  // C-Knowledge 的根级「知识库」面包屑回到自有首页，而不是引擎列表页。
+  router.push(isCKnowledgeConsole() ? '/home' : '/platform/knowledge-bases');
 };
 
 const handleNavigateToCurrentKB = () => {
@@ -2259,7 +2396,23 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 
 <template>
   <template v-if="!isFAQ">
-    <div class="knowledge-layout">
+    <div
+      class="knowledge-layout"
+      @dragenter="handleKbDragEnter"
+      @dragover="handleKbDragOver"
+      @dragleave="handleKbDragLeave"
+      @drop="handleKbDrop"
+    >
+      <!-- 拖拽文件到文档区时的整页高亮；drop 仍由 platform shell 统一转交确认流程 -->
+      <div v-if="fileDragActive" class="kb-drop-overlay" aria-hidden="true">
+        <div class="kb-drop-overlay__card">
+          <span class="kb-drop-overlay__icon">
+            <t-icon name="upload" size="30px" />
+          </span>
+          <p class="kb-drop-overlay__title">松开即可上传到当前知识库</p>
+          <p class="kb-drop-overlay__hint">会先打开上传确认，可设置标签与解析方式</p>
+        </div>
+      </div>
       <div class="document-header">
         <div class="document-header-title">
           <div class="document-title-row">
@@ -2488,7 +2641,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                       </button>
                     </t-tooltip>
                   </div>
-                  <div v-if="canEdit" class="doc-filter-actions">
+                  <div v-if="canUpload" class="doc-filter-actions">
                     <KbUploadSourceDropdown ref="uploadSourceRef" :accept-file-types="acceptFileTypes"
                       :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="add" :trigger-label="t('knowledgeBase.addDocument')"
                       trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
@@ -2634,6 +2787,35 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
     :confirm-loading="batchTagging"
     @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm" />
 
+  <t-dialog
+    v-model:visible="uploadEntryVisible"
+    header="上传资料"
+    :footer="false"
+    width="520px"
+    placement="center"
+  >
+    <div class="ck-upload-entry">
+      <p class="ck-upload-entry__target">
+        目标知识库：<strong>{{ kbInfo?.name || '当前知识库' }}</strong>
+      </p>
+      <div
+        class="ck-upload-entry__dropzone"
+        @dragover.prevent
+        @drop.stop.prevent="onUploadEntryDrop"
+      >
+        <span class="ck-upload-entry__icon">
+          <t-icon name="upload" size="28px" />
+        </span>
+        <p class="ck-upload-entry__title">把文件拖到这里</p>
+        <t-button theme="primary" @click="openUploadEntryPicker">选择文件</t-button>
+      </div>
+      <p class="ck-upload-entry__tip">
+        支持 PDF、Word、Excel、PPT、Markdown、纯文本等格式，单个文件不超过 {{ MAX_FILE_SIZE_MB }}MB。
+        选好后会先打开上传确认，可设置标签与解析方式。
+      </p>
+    </div>
+  </t-dialog>
+
 </template>
 <style>
 /* 下拉菜单容器样式已统一至 @/assets/dropdown-menu.less */
@@ -2646,6 +2828,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 </style>
 <style scoped lang="less">
 .knowledge-layout {
+  position: relative;
   display: flex;
   flex-direction: column;
   margin: 0 16px 0 0;
@@ -3428,6 +3611,54 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 .knowledge-card:hover {
   border-color: color-mix(in srgb, var(--td-component-stroke) 55%, var(--td-brand-color));
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
+}
+
+// 上传投递面板（从首页带 ?upload=1 进入时先落到这里）
+.ck-upload-entry__target {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--td-text-color-secondary);
+}
+
+.ck-upload-entry__target strong {
+  color: var(--td-text-color-primary);
+  font-weight: 600;
+}
+
+.ck-upload-entry__dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 16px;
+  border: 1px dashed var(--td-brand-color-4);
+  border-radius: 10px;
+  background: var(--td-brand-color-1);
+  text-align: center;
+}
+
+.ck-upload-entry__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--td-bg-color-container);
+  color: var(--td-brand-color);
+}
+
+.ck-upload-entry__title {
+  margin: 0;
+  font-size: 14px;
+  color: var(--td-text-color-primary);
+}
+
+.ck-upload-entry__tip {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--td-text-color-placeholder);
 }
 
 </style>

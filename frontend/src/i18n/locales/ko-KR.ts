@@ -5335,6 +5335,7 @@ export default {
     logout: '로그아웃',
     oidcLogin: 'OIDC로 로그인',
     oidcLoginWithProvider: '{provider}(으)로 로그인',
+    feishuLogin: '중하이퉁으로 로그인',
     redirectingToOIDC: 'ID 공급자로 이동하는 중...',
     orContinueWith: '또는 다음 방법으로 계속',
     oidcLoginFailed: 'OIDC 로그인 실패',

@@ -7,6 +7,7 @@ import ProtectedResourcePreview from '@/components/ProtectedResourcePreview.vue'
 import ManualKnowledgeEditor from '@/components/manual-knowledge-editor.vue'
 import UploadConfirmHost from '@/components/UploadConfirmHost.vue'
 import { useAuthStore } from '@/stores/auth'
+import { afterLoginPath, isCKnowledgeConsole, resolveTenantSelection } from '@/utils/ckConsole'
 import { useSettingsStore } from '@/stores/settings'
 import { getCurrentUser, userInfoFromApi } from '@/api/auth'
 import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
@@ -89,11 +90,13 @@ const syncOIDCUserContext = async () => {
   // override is set; otherwise drop any stale override.
   const activeIdNum = tenant?.id != null ? Number(tenant.id) : NaN
   const homeIdNum = user.tenant_id != null ? Number(user.tenant_id) : NaN
-  if (Number.isFinite(activeIdNum) && Number.isFinite(homeIdNum) && activeIdNum !== homeIdNum) {
-    authStore.setSelectedTenant(activeIdNum, tenant?.name || null)
-  } else {
-    authStore.setSelectedTenant(null, null)
-  }
+  const selection = resolveTenantSelection({
+    activeTenantId: Number.isFinite(activeIdNum) ? activeIdNum : null,
+    activeTenantName: tenant?.name || null,
+    homeTenantId: Number.isFinite(homeIdNum) ? homeIdNum : null,
+    memberships,
+  })
+  authStore.setSelectedTenant(selection.id, selection.name)
 }
 
 const persistOIDCLoginResponse = async (response: any) => {
@@ -117,12 +120,12 @@ const persistOIDCLoginResponse = async (response: any) => {
     if (result.ok) MessagePlugin.success(t('inviteRegister.joined'))
     else MessagePlugin.warning(t('inviteRegister.invalidBody'))
     // 会话已有效，无论 token 是否兑换成功都进入应用。
-    router.replace('/platform/knowledge-bases')
+    router.replace(afterLoginPath(true))
     return
   }
 
   await nextTick()
-  router.replace(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
+  router.replace(afterLoginPath(authStore.hasValidTenant))
 }
 
 const handleGlobalOIDCCallback = async () => {
@@ -239,6 +242,9 @@ const showPendingTenantSwitchToast = () => {
 }
 
 onMounted(() => {
+  if (isCKnowledgeConsole() && !window.location.pathname.includes('/embed')) {
+    document.title = 'C-Knowledge · 知识库管理台'
+  }
   handleGlobalOIDCCallback()
   showPendingTenantSwitchToast()
 

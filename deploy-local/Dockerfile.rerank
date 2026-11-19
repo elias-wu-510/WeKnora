@@ -1,0 +1,2 @@
+FROM wechatopenai/weknora-app:v0.8.2
+COPY --from=weknora-app-builder:rerank-20261002 --chown=appuser:appuser /app/WeKnora /app/WeKnora

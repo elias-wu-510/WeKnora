@@ -2,9 +2,15 @@
     <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed, 'aside_box--resizing': uiStore.sidebarResizing }">
         <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
-            <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
-                <img class="logo" src="@/assets/img/weknora.png" alt="">
-                <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
+            <div class="logo_box" @click="router.push(isCkConsole ? '/home' : '/platform/knowledge-bases')" style="cursor: pointer;">
+                <template v-if="isCkConsole">
+                    <img class="logo ck-logo" :src="ckLogo" alt="C-Knowledge">
+                    <span class="ck-wordmark">C-Knowledge</span>
+                </template>
+                <template v-else>
+                    <img class="logo" src="@/assets/img/weknora.png" alt="">
+                    <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
+                </template>
             </div>
             <div class="logo_actions">
                 <t-tooltip placement="bottom">
@@ -216,6 +222,8 @@
 import { storeToRefs } from 'pinia';
 import { onMounted, onUnmounted, watch, computed, ref, h, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { isCKnowledgeConsole } from '@/utils/ckConsole';
+import ckLogo from '@/assets/img/ck-logo.svg';
 import { getSessionsList, batchDelSessions, deleteAllSessions, getSession } from "@/api/chat/index";
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { listAllIMChannels } from '@/api/agent/index';
@@ -436,12 +444,15 @@ const isInAgentList = computed<boolean>(() => route.name === 'agentList');
 const isInOrganizationList = computed<boolean>(() => route.name === 'organizationList');
 
 // 统一的菜单项激活状态判断
+const isCkConsole = isCKnowledgeConsole()
+
 const isMenuItemActive = (itemPath: string): boolean => {
     const currentRoute = route.name;
 
     switch (itemPath) {
         case 'knowledge-bases':
-            return currentRoute === 'knowledgeBaseList' ||
+            return currentRoute === 'ckHome' ||
+                currentRoute === 'knowledgeBaseList' ||
                 currentRoute === 'knowledgeBaseDetail' ||
                 currentRoute === 'knowledgeBaseSettings';
         case 'agents':
@@ -1158,6 +1169,11 @@ const getIcon = (path: string) => {
 getIcon(typeof route.name === 'string' ? route.name as string : (route.name ? String(route.name) : ''))
 const handleMenuClick = async (path: string) => {
     if (path === 'knowledge-bases') {
+        // C-Knowledge 的「知识库」入口回到自有首页（总览 + 库列表）。
+        if (isCkConsole) {
+            router.push('/home')
+            return
+        }
         // 知识库菜单项：如果在知识库内部，跳转到当前知识库文件页；否则跳转到知识库列表
         const kbId = await getCurrentKbId()
         if (kbId) {
@@ -1355,6 +1371,23 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         .logo {
             width: 128px;
             height: auto;
+        }
+
+        .logo.ck-logo {
+            width: 26px;
+            height: 26px;
+            flex-shrink: 0;
+        }
+
+        .ck-wordmark {
+            margin-left: 9px;
+            font-size: 15px;
+            font-weight: 650;
+            letter-spacing: -0.01em;
+            color: var(--td-text-color-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .lite-badge {
@@ -1948,7 +1981,7 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
 </style>
 <style lang="less">
 // Dark mode: invert dark logo to light
-html[theme-mode="dark"] .aside_box .logo_box .logo {
+html[theme-mode="dark"] .aside_box .logo_box .logo:not(.ck-logo) {
     filter: invert(1) hue-rotate(180deg);
 }
 

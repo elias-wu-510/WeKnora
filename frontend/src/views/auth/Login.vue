@@ -1,5 +1,5 @@
 <template>
-  <div class="login-layout">
+  <div class="login-layout" :class="{ 'login-layout--ck': isCkConsole }">
     <div class="animated-bg">
       <div class="knowledge-node node-1">
         <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -96,12 +96,17 @@
     </div>
 
     <!-- Logo - Top Left -->
-    <a href="https://github.com/Tencent/WeKnora" target="_blank" class="header-logo" :title="$t('common.github')">
+    <div v-if="isCkConsole" class="header-logo header-logo--ck" title="C-Knowledge">
+      <img :src="ckLogo" alt="C-Knowledge" class="logo-image logo-image--ck" />
+      <span class="header-wordmark">C-Knowledge</span>
+    </div>
+    <a v-else href="https://github.com/Tencent/WeKnora" target="_blank" class="header-logo" :title="$t('common.github')">
       <img src="@/assets/img/weknora.png" alt="WeKnora" class="logo-image" />
     </a>
 
     <!-- Header Links - Top Right -->
     <div class="header-links">
+      <template v-if="!isCkConsole">
       <a href="https://weknora.weixin.qq.com" target="_blank" class="header-link" :title="$t('common.website')">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
           stroke-linecap="round">
@@ -119,6 +124,7 @@
         </svg>
         <span class="link-text">GitHub</span>
       </a>
+      </template>
 
       <div class="language-switch">
         <button @click="toggleLanguageMenu" class="header-link" :title="currentLangOption?.label">
@@ -142,8 +148,8 @@
       </div>
     </div>
 
-    <!-- Left Showcase Section -->
-    <div class="showcase-section">
+    <!-- Left Showcase Section：C-Knowledge 是白标控制台，不展示引擎营销页 -->
+    <div v-if="!isCkConsole" class="showcase-section">
       <div class="showcase-content">
         <p class="showcase-subtitle">{{ $t('platform.subtitle') }}</p>
         <p class="showcase-description">{{ $t('platform.description') }}</p>
@@ -193,8 +199,8 @@
             {{ inviteLookupError }}
           </div>
           <div class="form-header">
-            <h2 class="form-title">{{ $t('auth.login') }}</h2>
-            <p class="form-welcome">{{ $t('auth.subtitle') }}</p>
+            <h2 class="form-title">{{ isCkConsole ? '登录 C-Knowledge' : $t('auth.login') }}</h2>
+            <p class="form-welcome">{{ isCkConsole ? '使用 Senior AI 账号进入知识库管理台' : $t('auth.subtitle') }}</p>
             <p v-if="registrationEnabled" class="form-hint">{{ $t('auth.loginHint') }}</p>
           </div>
 
@@ -225,13 +231,13 @@
                 </t-button>
               </div>
 
-              <div v-if="oidcEnabled" class="oidc-divider">
+              <div v-if="ssoLoginAvailable" class="oidc-divider">
                 <span>{{ $t('auth.orContinueWith') }}</span>
               </div>
 
-              <t-button v-if="oidcEnabled" theme="default" size="large" block :loading="oidcLoading" :disabled="loading"
-                class="oidc-button" @click="handleOIDCLogin">
-                {{ oidcLoading ? $t('auth.redirectingToOIDC') : oidcLoginText }}
+              <t-button v-if="ssoLoginAvailable" theme="default" size="large" block :loading="oidcLoading"
+                :disabled="loading" class="oidc-button" @click="handleSSOLogin">
+                {{ oidcLoading ? $t('auth.redirectingToOIDC') : ssoLoginText }}
               </t-button>
             </t-form>
 
@@ -344,6 +350,9 @@ import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
 import { canRegister } from './registrationPolicy'
 import { newPasswordRules } from '@/utils/passwordPolicy'
+import { afterLoginPath, isCKnowledgeConsole, resolveTenantSelection } from '@/utils/ckConsole'
+import { getApiBaseUrl } from '@/utils/api-base'
+import ckLogo from '@/assets/img/ck-logo.svg'
 import { Swiper, SwiperSlide } from 'swiper/vue'
 import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
 import 'swiper/css'
@@ -370,6 +379,7 @@ import screenshot2 from '@/assets/img/screenshot-2.svg'
 import screenshot3 from '@/assets/img/screenshot-3.svg'
 import screenshot4 from '@/assets/img/screenshot-4.svg'
 
+const isCkConsole = isCKnowledgeConsole()
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
@@ -417,6 +427,9 @@ const oidcProviderName = ref('')
 // Wait for configuration before showing a registration entry.
 const registrationMode = ref('')
 const registrationEnabled = computed(() => canRegister(registrationMode.value, !!inviteLookup.value))
+// 飞书（中海通）直连登录：仅 C-Knowledge 控制台且后端返回 feishu_enabled=true
+// 时启用。默认 false，接口失败/老版本后端不返回该字段时保持原 SAI 登录路径。
+const feishuEnabled = ref(false)
 const complexPasswordEnabled = ref(false)
 
 // invite-link state. When the URL carries ?token=xxx we resolve it to
@@ -440,11 +453,22 @@ const languageOptions = [
 
 const currentLanguage = computed(() => locale.value)
 const oidcLoginText = computed(() => {
-  if (oidcProviderName.value) {
-    return t('auth.oidcLoginWithProvider', { provider: oidcProviderName.value })
+  // C-Knowledge 面向 Senior AI 用户：这里统一叫「SAI 登录」，不暴露底层 OIDC 供应商名字。
+  const provider = isCkConsole ? 'SAI' : oidcProviderName.value
+  if (provider) {
+    return t('auth.oidcLoginWithProvider', { provider })
   }
   return t('auth.oidcLogin')
 })
+// 飞书直连只在 C-Knowledge 控制台且后端明确 feishu_enabled=true 时生效；
+// 非 CK 部署与未配置飞书的环境继续走原有 OIDC（SAI）路径。
+const feishuLoginEnabled = computed(() => isCkConsole && feishuEnabled.value)
+// 飞书可用时即使 OIDC 未开启也要露出 SSO 按钮：两者回调格式一致，
+// 后端只需配置飞书即可登录，不强制同时开启 OIDC。
+const ssoLoginAvailable = computed(() => feishuLoginEnabled.value || oidcEnabled.value)
+const ssoLoginText = computed(() =>
+  feishuLoginEnabled.value ? t('auth.feishuLogin') : oidcLoginText.value,
+)
 const currentLangOption = computed(() => languageOptions.find(l => l.value === currentLanguage.value))
 
 // Login form data
@@ -579,11 +603,13 @@ const persistLoginResponse = async (response: any, skipRedirect = false) => {
     // previous session for a different account.
     const activeIdNum = Number(activeTenant?.id)
     const homeIdNum = Number(homeTenantIdRaw)
-    if (Number.isFinite(activeIdNum) && Number.isFinite(homeIdNum) && activeIdNum !== homeIdNum) {
-      authStore.setSelectedTenant(activeIdNum, activeTenant?.name || null)
-    } else {
-      authStore.setSelectedTenant(null, null)
-    }
+    const selection = resolveTenantSelection({
+      activeTenantId: Number.isFinite(activeIdNum) ? activeIdNum : null,
+      activeTenantName: activeTenant?.name || null,
+      homeTenantId: Number.isFinite(homeIdNum) ? homeIdNum : null,
+      memberships: response.memberships,
+    })
+    authStore.setSelectedTenant(selection.id, selection.name)
   }
 
   // Pull runtime capabilities (including whether ordinary users may create
@@ -592,10 +618,15 @@ const persistLoginResponse = async (response: any, skipRedirect = false) => {
   await authStore.refreshFromAuthMe()
   await nextTick()
   if (skipRedirect) return
-  router.replace(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
+  router.replace(afterLoginPath(authStore.hasValidTenant))
 }
 
-const getBackendOIDCRedirectURI = () => `${window.location.origin}/api/v1/auth/oidc/callback`
+const getBackendOIDCRedirectURI = () => {
+  // The SPA can be mounted under a path prefix (C-Knowledge lives at
+  // /c-knowledge/), so the callback has to carry that prefix too.
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/+$/, '')
+  return `${window.location.origin}${base}/api/v1/auth/oidc/callback`
+}
 
 const loadOIDCConfig = async () => {
   try {
@@ -614,10 +645,35 @@ const loadAuthConfig = async () => {
     const response = await getAuthConfig()
     registrationMode.value = response.success ? response.registration_mode : ''
     complexPasswordEnabled.value = response.complex_password_enabled
+    feishuEnabled.value = response.feishu_enabled === true
   } catch {
     registrationMode.value = ''
     complexPasswordEnabled.value = false
+    feishuEnabled.value = false
   }
+}
+
+// 飞书登录是整页跳转：后端 /auth/feishu/start 302 到飞书登录页，回调完成后
+// 浏览器回到 `${BASE_URL}/#oidc_result=...`，由 App.vue 的 syncOIDCUserContext
+// 兑换，与现有 OIDC 完全同一条落地路径。
+const handleFeishuLogin = () => {
+  try {
+    // 与 OIDC 一致：分享链接落地后跳外部 IdP 会丢 query 参数，先暂存邀请 token。
+    if (inviteToken.value) {
+      sessionStorage.setItem('weknora_pending_invite_token', inviteToken.value)
+    }
+  } catch {
+    /* 隐私模式下 sessionStorage 不可写，忽略，不阻塞登录 */
+  }
+  window.location.href = `${getApiBaseUrl()}/api/v1/auth/feishu/start`
+}
+
+const handleSSOLogin = () => {
+  if (feishuLoginEnabled.value) {
+    handleFeishuLogin()
+    return
+  }
+  handleOIDCLogin()
 }
 
 const handleOIDCLogin = async () => {
@@ -1056,6 +1112,37 @@ onMounted(async () => {
 }
 
 /* Left Showcase Section */
+.login-layout--ck {
+  align-items: center;
+  justify-content: center;
+
+  .form-section {
+    flex: 1 1 auto;
+    align-items: center;
+    padding: 96px 24px 64px;
+  }
+}
+
+.header-logo--ck {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+
+.header-logo.header-logo--ck .logo-image--ck {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+}
+
+.header-wordmark {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+
 .showcase-section {
   flex: 0 0 52%;
   display: flex;

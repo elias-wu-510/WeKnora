@@ -45,7 +45,9 @@ func (c *Client) url() string {
 	if path == "" {
 		path = defaultPath
 	}
-	if strings.HasSuffix(strings.TrimRight(c.cfg.Endpoint.BaseURL, "/"), path) {
+	baseURL := strings.TrimRight(c.cfg.Endpoint.BaseURL, "/")
+	if strings.HasSuffix(baseURL, path) ||
+		(path == defaultPath && strings.HasSuffix(baseURL, "/compatible-api/v1/reranks")) {
 		path = ""
 	}
 	return c.cfg.Endpoint.Resolve(path)

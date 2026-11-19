@@ -111,6 +111,22 @@ func TestDecodesAnObjectDocument(t *testing.T) {
 	}, got)
 }
 
+func TestDashScopeFlatRerankFullEndpoint(t *testing.T) {
+	server, path, body := serve(t, `{"object":"list","results":[{"index":1,"relevance_score":0.9},{"index":0,"relevance_score":0.2}],"model":"qwen3-rerank"}`)
+	defer server.Close()
+
+	client := newClient(t, server.URL+"/compatible-api/v1/reranks/", api.RerankSettings{})
+	got, err := client.Rerank(context.Background(), "苹果手机", []string{"水果", "iPhone"})
+	require.NoError(t, err)
+	assert.Equal(t, "/compatible-api/v1/reranks", *path)
+	assert.Equal(t, map[string]any{
+		"model": "rerank", "query": "苹果手机", "documents": []any{"水果", "iPhone"},
+	}, *body)
+	assert.Equal(t, []api.RerankResult{
+		{Index: 1, Score: 0.9}, {Index: 0, Score: 0.2},
+	}, got)
+}
+
 // Some gateways serving this shape spell the score `score`. The pre-catalog
 // client accepted both and so does this one.
 func TestDecodesTheScoreAlias(t *testing.T) {

@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -131,6 +134,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		thinkingOpen := false
 		answerCompleted := false
 		answerProduced := false
+		var answerBuf strings.Builder
 
 		closeThinking := func() {
 			if !thinkingOpen {
@@ -162,14 +166,15 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					Data:      event.AgentThoughtData{Content: thinkingTail},
 				})
 			}
-			answerTail := answerDecoder.Flush()
-			if answerTail != "" {
+			answerBuf.WriteString(answerDecoder.Flush())
+			if answerBuf.Len() > 0 {
 				_ = eventBus.Emit(ctx, types.Event{
 					ID:        answerID,
 					Type:      types.EventType(event.EventAgentFinalAnswer),
 					SessionID: chatManage.SessionID,
-					Data:      event.AgentFinalAnswerData{Content: answerTail},
+					Data:      event.AgentFinalAnswerData{Content: answerBuf.String()},
 				})
+				answerBuf.Reset()
 			}
 		}
 
@@ -250,19 +255,23 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					if answerCompleted {
 						continue
 					}
-					response.Content = answerDecoder.Feed(response.Content)
-					if response.Done {
-						response.Content += answerDecoder.Flush()
-						answerCompleted = true
+					answerBuf.WriteString(answerDecoder.Feed(response.Content))
+					if !response.Done {
+						continue
 					}
+					answerBuf.WriteString(answerDecoder.Flush())
+					answerCompleted = true
+					response.Content = answerBuf.String()
 					if strings.TrimSpace(response.Content) != "" {
 						answerProduced = true
 					}
-					truncated := response.Done && IsLengthFinishReason(response.FinishReason)
+					truncated := IsLengthFinishReason(response.FinishReason)
 					if truncated && !answerProduced {
 						response.Content = EmptyTruncatedAnswerFallback
 						answerProduced = true
 					}
+					response.Content = p.validateAndRepair(ctx, modelContext, chatModel, chatMessages, opt, response.Content)
+					answerBuf.Reset()
 					closeThinking()
 					eventBus.Emit(ctx, types.Event{
 						ID:        answerID,
@@ -270,7 +279,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 						SessionID: chatManage.SessionID,
 						Data: event.AgentFinalAnswerData{
 							Content:   response.Content,
-							Done:      response.Done,
+							Done:      true,
 							Truncated: truncated,
 						},
 					})
@@ -280,4 +289,69 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	}()
 
 	return next()
+}
+
+// validateAndRepair checks the completed answer against the original bodies of
+// the chunks it cites and asks the model once to fix citations that do not
+// support their sentence. The repaired answer replaces the draft only when the
+// number of unsupported citations strictly decreases.
+func (p *PluginChatCompletionStream) validateAndRepair(
+	ctx context.Context,
+	registry *modelcontext.Registry,
+	chatModel chat.Chat,
+	messages []chat.Message,
+	opt *chat.ChatOptions,
+	answer string,
+) string {
+	if registry == nil || strings.TrimSpace(answer) == "" {
+		return answer
+	}
+	violations := registry.ValidateAnswer(answer)
+	if len(violations) == 0 {
+		return answer
+	}
+	var details strings.Builder
+	for _, violation := range violations {
+		body, _ := registry.ChunkText(violation.ChunkID)
+		body = strings.Join(strings.Fields(body), " ")
+		if runes := []rune(body); len(runes) > 600 {
+			body = string(runes[:600])
+		}
+		fmt.Fprintf(&details, "- line: %s\n  fact missing from every cited chunk: %s\n  cited chunk body: %s\n",
+			violation.Line, violation.Fact, body)
+	}
+	repairMessages := append([]chat.Message{}, messages...)
+	repairMessages = append(repairMessages,
+		chat.Message{Role: "assistant", Content: answer},
+		chat.Message{
+			Role: "user",
+			Content: "One or more cited chunks do not contain a number or clause of the line they annotate; another retrieved chunk does. " +
+				"Rewrite only those lines so they cite the chunk whose body actually contains the value, keeping the value and the sentence. " +
+				"Do not delete numbers, sentences or citations, and do not touch lines that are already correct. Output only the corrected answer.\n\n" + details.String(),
+		},
+	)
+	repairCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	response, err := chatModel.Chat(repairCtx, repairMessages, opt)
+	if err != nil || response == nil || strings.TrimSpace(response.Content) == "" {
+		pipelineWarn(ctx, "Stream", "citation_repair_failed", map[string]interface{}{
+			"violations": len(violations),
+		})
+		return answer
+	}
+	decoder := registry.StreamDecoder()
+	fixed := decoder.Feed(response.Content) + decoder.Flush()
+	after := len(registry.ValidateAnswer(fixed))
+	if after >= len(violations) || modelcontext.FactLineCount(fixed) < modelcontext.FactLineCount(answer) {
+		pipelineInfo(ctx, "Stream", "citation_repair_rejected", map[string]interface{}{
+			"before": len(violations),
+			"after":  after,
+		})
+		return answer
+	}
+	pipelineInfo(ctx, "Stream", "citation_repair_applied", map[string]interface{}{
+		"before": len(violations),
+		"after":  after,
+	})
+	return fixed
 }

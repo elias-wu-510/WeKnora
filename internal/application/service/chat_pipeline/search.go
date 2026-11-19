@@ -133,7 +133,7 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 		})
 	}
 
-	chatManage.SearchResult = allResults
+	chatManage.SearchResult = limitCaptionsPerDocument(allResults, maxCaptionsPerDocument, chatManage.EmbeddingTopK)
 
 	logSearchScoreSample(ctx, "result_score_before_normalize", chatManage.SearchResult)
 
@@ -144,6 +144,7 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 			chatManage.SearchResult = append(chatManage.SearchResult, expResults...)
 		}
 	}
+	logTraceabilityCandidates(ctx, chatManage, "pre_rerank", chatManage.SearchResult)
 
 	logSearchScoreSample(ctx, "final_score", chatManage.SearchResult)
 
@@ -488,7 +489,7 @@ func (p *PluginSearch) searchByTargets(
 						KnowledgeBaseIDs:      fullKBIDs,
 						VectorThreshold:       chatManage.VectorThreshold,
 						KeywordThreshold:      chatManage.KeywordThreshold,
-						MatchCount:            chatManage.EmbeddingTopK,
+						MatchCount:            captionAwareMatchCount(chatManage.EmbeddingTopK),
 						SkipContextEnrichment: true,
 						DisableVectorMatch:    disableVector,
 						DisableKeywordsMatch:  chatManage.DisableKeywordsMatch,
@@ -566,7 +567,7 @@ func (p *PluginSearch) searchSingleTarget(
 		QueryEmbedding:        queryEmbedding,
 		VectorThreshold:       vectorThreshold,
 		KeywordThreshold:      keywordThreshold,
-		MatchCount:            chatManage.EmbeddingTopK,
+		MatchCount:            captionAwareMatchCount(chatManage.EmbeddingTopK),
 		TagIDs:                t.TagIDs,
 		ScopeTagIDs:           t.ScopeTagIDs,
 		SkipContextEnrichment: true,
@@ -667,4 +668,51 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 		"hit_count": len(res),
 	})
 	return res
+}
+
+// maxCaptionsPerDocument bounds how many image-caption chunks one document may
+// contribute to the answer context. Captions are model-written paraphrases of
+// figures, are short and dense, and therefore win vector recall against the
+// real text chunks of the same document — without a bound they crowd the
+// context with near-duplicates that cannot back a citation.
+const maxCaptionsPerDocument = 1
+
+// captionAwareMatchCount asks for extra candidates so that dropping surplus
+// captions does not shrink the evidence set: the freed slots are refilled by
+// the text and OCR chunks ranked just behind them.
+func captionAwareMatchCount(topK int) int {
+	if topK <= 0 {
+		return topK
+	}
+	return topK * 2
+}
+
+// limitCaptionsPerDocument keeps at most perDoc captions per document, then
+// trims the result list to limit.
+func limitCaptionsPerDocument(results []*types.SearchResult, perDoc, limit int) []*types.SearchResult {
+	if len(results) == 0 {
+		return results
+	}
+	captionCount := make(map[string]int)
+	out := make([]*types.SearchResult, 0, len(results))
+	for _, r := range results {
+		if r == nil {
+			continue
+		}
+		if r.ChunkType == string(types.ChunkTypeImageCaption) {
+			key := r.KnowledgeID
+			if key == "" {
+				key = r.KnowledgeBaseID
+			}
+			if captionCount[key] >= perDoc {
+				continue
+			}
+			captionCount[key]++
+		}
+		out = append(out, r)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
 }
