@@ -1236,6 +1236,77 @@ const handleKnowledgeFileDrop = (event: CustomEvent) => {
   handleUploadSourceFiles(files);
 };
 
+// ── 首页 / 库卡片「上传资料」交接（?upload=1） ─────────────────────────
+// 从 /home 带参数进来时，等当前库信息与权限都就绪再直接打开文件选择器；
+// 打开后把 query 清掉，刷新页面不会重复弹窗。
+let uploadAutoOpenKbId: string | null = null;
+
+const clearUploadQuery = () => {
+  if (route.query.upload !== '1') return;
+  const query = { ...route.query };
+  delete (query as any).upload;
+  void router.replace({ path: route.path, query, hash: route.hash });
+};
+
+// 同一个页面再次收到 ?upload=1（例如从首页重复点同一张卡片）也要能再次弹窗。
+watch(
+  () => route.query.upload,
+  (value) => {
+    if (value === '1') uploadAutoOpenKbId = null;
+  },
+);
+
+const maybeAutoOpenUploadPicker = async () => {
+  if (route.query.upload !== '1') return;
+  if (kbLoading.value || !kbInfo.value || isFAQ.value || !canEdit.value) return;
+  if (uploadAutoOpenKbId === kbId.value) return;
+  uploadAutoOpenKbId = kbId.value;
+  // 上传入口只存在于「文档」tab 的工具栏里：wiki 库带参数进来时先切回文档。
+  if (isWiki.value) activeKbTab.value = 'documents';
+  for (let attempt = 0; attempt < 3 && !uploadSourceRef.value; attempt += 1) {
+    await nextTick();
+  }
+  if (!uploadSourceRef.value) {
+    // 入口尚未渲染（极少见）；释放标记，等下次依赖变化再试。
+    uploadAutoOpenKbId = null;
+    return;
+  }
+  uploadSourceRef.value.openFileDialog();
+  clearUploadQuery();
+};
+
+watch(
+  [() => route.query.upload, kbLoading, canEdit, isFAQ, () => kbInfo.value?.id],
+  () => { void maybeAutoOpenUploadPicker(); },
+  { immediate: true },
+);
+
+// ── 拖拽上传的可视反馈 ──────────────────────────────────────────────
+// 真正的落盘由 platform shell 的全局 drop 处理（派发 weknora:knowledge-file-drop，
+// 本页 handleKnowledgeFileDrop 复用上传确认流程）；这里只负责遮罩与文案。
+const fileDragDepth = ref(0);
+const fileDragActive = computed(() => fileDragDepth.value > 0 && canEdit.value && !isFAQ.value);
+const dragCarriesFiles = (event: DragEvent) => {
+  const types = event.dataTransfer?.types;
+  return !!types && Array.from(types).includes('Files');
+};
+const handleKbDragEnter = (event: DragEvent) => {
+  if (!dragCarriesFiles(event) || !canEdit.value) return;
+  fileDragDepth.value += 1;
+};
+const handleKbDragOver = (event: DragEvent) => {
+  if (!dragCarriesFiles(event) || !canEdit.value) return;
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  if (fileDragDepth.value === 0) fileDragDepth.value = 1;
+};
+const handleKbDragLeave = (event: DragEvent) => {
+  if (!dragCarriesFiles(event)) return;
+  fileDragDepth.value = Math.max(0, fileDragDepth.value - 1);
+};
+const handleKbDrop = () => {
+  fileDragDepth.value = 0;
+};
+
 // Auto-open document detail when navigated with ?knowledge_id=xxx.
 // Note: this runs both when the KB page mounts with a query param AND when a
 // subsequent in-page navigation (e.g. from the global command palette) only
@@ -1645,7 +1716,25 @@ const enqueueUploads = (
     processConfig: options.processConfig,
     uploads: files.map(file => ({ file, fileName: buildUploadFileName(file, targetFolder) })),
   });
+  // 浮层已经给出进度，这里补一句「确实收下了」的即时确认，避免确认弹窗
+  // 关闭后到第一批进度出现之间有一段没有反馈的空窗。
+  MessagePlugin.success(`已加入上传队列，共 ${files.length} 个文件`);
 };
+
+// 传输失败时把文件名直接说出来：浮层可能被收起，用户仍需要知道是哪个文件失败。
+const notifiedFailedUploads = new Set<string>();
+watch(
+  () => uploadTasksStore.items.map(item => `${item.id}:${item.transfer}`).join('|'),
+  () => {
+    for (const item of uploadTasksStore.items) {
+      if (item.transfer !== 'failed' || notifiedFailedUploads.has(item.id)) continue;
+      const batch = uploadTasksStore.batches.find(entry => entry.id === item.batchId);
+      if (!batch || batch.kbId !== kbId.value) continue;
+      notifiedFailedUploads.add(item.id);
+      MessagePlugin.error(`「${item.name}」上传失败${item.error ? `：${item.error}` : ''}`);
+    }
+  },
+);
 
 const executeUrlImport = async (
   url: string,
@@ -2229,7 +2318,23 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 
 <template>
   <template v-if="!isFAQ">
-    <div class="knowledge-layout">
+    <div
+      class="knowledge-layout"
+      @dragenter="handleKbDragEnter"
+      @dragover="handleKbDragOver"
+      @dragleave="handleKbDragLeave"
+      @drop="handleKbDrop"
+    >
+      <!-- 拖拽文件到文档区时的整页高亮；drop 仍由 platform shell 统一转交确认流程 -->
+      <div v-if="fileDragActive" class="kb-drop-overlay" aria-hidden="true">
+        <div class="kb-drop-overlay__card">
+          <span class="kb-drop-overlay__icon">
+            <t-icon name="upload" size="30px" />
+          </span>
+          <p class="kb-drop-overlay__title">松开即可上传到当前知识库</p>
+          <p class="kb-drop-overlay__hint">会先打开上传确认，可设置标签与解析方式</p>
+        </div>
+      </div>
       <div class="document-header">
         <div class="document-header-title">
           <div class="document-title-row">
@@ -2623,6 +2728,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 </style>
 <style scoped lang="less">
 .knowledge-layout {
+  position: relative;
   display: flex;
   flex-direction: column;
   margin: 0 16px 0 0;
@@ -2633,6 +2739,71 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   min-width: 0;
   padding: 20px 28px 0;
   box-sizing: border-box;
+}
+
+// 拖拽遮罩：盖住页面内容区（含全局上传遮罩），用中文文案说明落点。
+.kb-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
+  background: color-mix(in srgb, var(--td-bg-color-container) 82%, transparent);
+  border: 2px dashed var(--td-brand-color);
+  border-radius: 18px;
+  pointer-events: none;
+
+  &__card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 32px 44px;
+    border-radius: 18px;
+    background: var(--td-bg-color-container);
+    box-shadow: 0 18px 48px rgba(15, 23, 42, 0.16);
+    text-align: center;
+  }
+
+  &__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--td-brand-color-light);
+    color: var(--td-brand-color);
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+  }
+
+  &__hint {
+    margin: 0;
+    font-size: 13px;
+    color: var(--td-text-color-secondary);
+  }
+}
+
+@media (max-width: 900px) {
+  .kb-drop-overlay__card {
+    padding: 24px 20px;
+    width: 100%;
+    max-width: 320px;
+    box-sizing: border-box;
+  }
+
+  .kb-drop-overlay__title {
+    font-size: 16px;
+  }
 }
 
 // Breadcrumb tab switch (文档/Wiki in breadcrumb)

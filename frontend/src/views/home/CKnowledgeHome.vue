@@ -11,7 +11,11 @@
           <template #icon><t-icon name="refresh" /></template>
           刷新
         </t-button>
-        <t-button theme="primary" @click="goManage">知识库管理</t-button>
+        <t-button variant="outline" @click="goManage">知识库管理</t-button>
+        <t-button theme="primary" :disabled="loading || !uploadableBases.length" @click="openUploadPicker">
+          <template #icon><t-icon name="upload" /></template>
+          上传资料
+        </t-button>
       </div>
     </header>
 
@@ -71,7 +75,22 @@
             <span class="ck-card__icon" :class="`ck-card__icon--${kb.type || 'document'}`">
               <t-icon :name="kb.type === 'faq' ? 'chat-bubble' : 'folder'" />
             </span>
-            <span v-if="kb.type === 'faq'" class="ck-card__badge">问答</span>
+            <div class="ck-card__top-actions">
+              <span v-if="kb.type === 'faq'" class="ck-card__badge">问答</span>
+              <button
+                v-else
+                type="button"
+                class="ck-card__upload"
+                :aria-label="`上传资料到${kb.name}`"
+                :title="`上传资料到${kb.name}`"
+                @click.stop="uploadToBase(kb)"
+                @keydown.enter.stop
+                @keydown.space.stop
+              >
+                <t-icon name="upload" size="14px" />
+                <span>上传</span>
+              </button>
+            </div>
           </div>
           <h3 class="ck-card__name">{{ kb.name }}</h3>
           <p class="ck-card__desc">{{ kb.description || '暂无描述' }}</p>
@@ -82,6 +101,29 @@
         </article>
       </div>
     </section>
+
+    <t-dialog
+      v-model:visible="uploadPickerVisible"
+      header="上传资料"
+      :footer="false"
+      width="440px"
+      placement="center"
+    >
+      <p class="ck-upload-picker__hint">选择要上传资料的知识库，进入后会直接打开文件选择器。</p>
+      <div class="ck-upload-picker__list">
+        <button
+          v-for="kb in uploadableBases"
+          :key="kb.id"
+          type="button"
+          class="ck-upload-picker__item"
+          @click="uploadToBase(kb)"
+        >
+          <span class="ck-upload-picker__icon"><t-icon name="folder" size="18px" /></span>
+          <span class="ck-upload-picker__name">{{ kb.name }}</span>
+          <t-icon name="upload" size="16px" class="ck-upload-picker__arrow" />
+        </button>
+      </div>
+    </t-dialog>
   </div>
 </template>
 
@@ -105,6 +147,10 @@ const router = useRouter()
 const bases = ref<CkKnowledgeBase[]>([])
 const loading = ref(true)
 const error = ref('')
+const uploadPickerVisible = ref(false)
+
+// 问答库没有文件上传链路，不参与上传入口。
+const uploadableBases = computed(() => bases.value.filter(kb => kb.type !== 'faq'))
 
 const documentCount = computed(() =>
   bases.value.reduce((total, kb) => total + Number(kb.knowledge_count || 0), 0),
@@ -154,6 +200,21 @@ async function load() {
 
 function openBase(kb: CkKnowledgeBase) {
   router.push(`/platform/knowledge-bases/${kb.id}`)
+}
+
+// 上传入口用路由 query 与详情页交接（详情页会自动打开文件选择器）。
+function uploadToBase(kb: CkKnowledgeBase) {
+  uploadPickerVisible.value = false
+  router.push(`/platform/knowledge-bases/${kb.id}?upload=1`)
+}
+
+function openUploadPicker() {
+  if (loading.value || !uploadableBases.value.length) return
+  if (uploadableBases.value.length === 1) {
+    uploadToBase(uploadableBases.value[0])
+    return
+  }
+  uploadPickerVisible.value = true
 }
 
 function goManage() {
@@ -344,12 +405,106 @@ watch(
   color: #b45309;
 }
 
+.ck-card__top-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ck-card__upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 999px;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.16s ease, border-color 0.16s ease, background-color 0.16s ease;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--td-brand-color);
+    border-color: var(--td-brand-color-light-active);
+    background: var(--td-brand-color-light);
+    outline: none;
+  }
+}
+
 .ck-card__badge {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 999px;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
+}
+
+.ck-upload-picker__hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--td-text-color-secondary);
+}
+
+.ck-upload-picker__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.ck-upload-picker__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  font-size: 14px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    border-color: var(--td-brand-color-light-active);
+    background: var(--td-brand-color-light);
+    outline: none;
+  }
+}
+
+.ck-upload-picker__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--td-brand-color-light);
+  color: var(--td-brand-color);
+}
+
+.ck-upload-picker__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ck-upload-picker__arrow {
+  color: var(--td-text-color-placeholder);
+  flex-shrink: 0;
 }
 
 .ck-card__name {
@@ -421,6 +576,29 @@ watch(
 
   .ck-home__stats {
     grid-template-columns: 1fr;
+  }
+
+  .ck-home__actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .ck-card {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .ck-home__actions :deep(.t-button) {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .ck-card__upload {
+    height: 32px;
+    padding: 0 12px;
   }
 }
 </style>

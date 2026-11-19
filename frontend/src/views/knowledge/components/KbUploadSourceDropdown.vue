@@ -228,7 +228,17 @@ const openUrlDialog = () => {
   urlDialogVisible.value = true
 }
 
-defineExpose({ openUrlDialog })
+// Opened from the home page's ?upload=1 hand-off: skip the dropdown and go
+// straight to the OS file picker, so the user lands on the KB already choosing
+// files. Returns false while the trigger is not mounted (e.g. a non-document
+// tab), letting the caller retry instead of silently dropping the intent.
+const openFileDialog = (): boolean => {
+  if (!fileInputRef.value) return false
+  fileInputRef.value.click()
+  return true
+}
+
+defineExpose({ openUrlDialog, openFileDialog })
 </script>
 
 <style lang="less" scoped>
