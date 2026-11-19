@@ -1258,6 +1258,16 @@ watch(
 
 const maybeAutoOpenUploadPicker = async () => {
   if (route.query.upload !== '1') return;
+  // 库信息就绪后先判权限：只读成员从首页点「上传」时给出明确提示，
+  // 并把参数清掉，避免地址栏一直挂着 ?upload=1 却什么也没发生。
+  if (!kbLoading.value && kbInfo.value && !isFAQ.value && !canEdit.value) {
+    if (uploadAutoOpenKbId !== kbId.value) {
+      uploadAutoOpenKbId = kbId.value;
+      MessagePlugin.warning('你没有该知识库的上传权限，请联系空间管理员');
+    }
+    clearUploadQuery();
+    return;
+  }
   if (kbLoading.value || !kbInfo.value || isFAQ.value || !canEdit.value) return;
   if (uploadAutoOpenKbId === kbId.value) return;
   uploadAutoOpenKbId = kbId.value;
