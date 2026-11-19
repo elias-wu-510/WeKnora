@@ -180,8 +180,6 @@ type SearchResult struct {
 	ChunkType string `json:"chunk_type"`
 	// 父 Chunk ID
 	ParentChunkID string `json:"parent_chunk_id"`
-	// ContextHeader is the request-local heading breadcrumb carried from the indexed chunk.
-	ContextHeader string `json:"-" gorm:"-"`
 	// 图片信息 (JSON 格式)
 	ImageInfo string `json:"image_info"`
 
