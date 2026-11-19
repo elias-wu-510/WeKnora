@@ -235,7 +235,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		Language:                 lang,
 	}
 
-	langfuse.InjectTracing(ctx, &taskPayload)
+	applyDocumentTaskCorrelation(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal document process task payload: %v", err)
@@ -431,7 +431,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		Language:                 lang,
 	}
 
-	langfuse.InjectTracing(ctx, &taskPayload)
+	applyDocumentTaskCorrelation(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal URL process task payload: %v", err)
@@ -675,7 +675,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		Language:                 lang,
 	}
 
-	langfuse.InjectTracing(ctx, &taskPayload)
+	applyDocumentTaskCorrelation(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal file URL process task payload: %v", err)
@@ -952,7 +952,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			Language:                 lang,
 		}
 
-		langfuse.InjectTracing(ctx, &taskPayload)
+		applyDocumentTaskCorrelation(ctx, &taskPayload)
 		payloadBytes, err := json.Marshal(taskPayload)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to marshal passage process task payload: %v", err)

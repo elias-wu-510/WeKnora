@@ -2618,6 +2618,18 @@ func (s *knowledgeService) ReparseKnowledge(
 	knowledgeID string,
 	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
+	return s.reparseKnowledge(ctx, knowledgeID, processOverrides, true)
+}
+
+// reparseKnowledge rebuilds a knowledge row. cancelStale is false only for
+// callers that already cancelled the previous attempt's tasks before changing
+// the row (file replacement does this before swapping the source).
+func (s *knowledgeService) reparseKnowledge(
+	ctx context.Context,
+	knowledgeID string,
+	processOverrides *types.KnowledgeProcessOverrides,
+	cancelStale bool,
+) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start re-parsing knowledge")
 
 	existing, kb, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, knowledgeID)
@@ -2627,6 +2639,16 @@ func (s *knowledgeService) ReparseKnowledge(
 	}
 
 	tenantID := existing.TenantID
+
+	// A reparse supersedes whatever is still queued or running for this row.
+	// Left alone, a stale queued task starts after the cleanup below and
+	// appends a second copy of every chunk (re-billing the embedding call),
+	// while a still-running one races the new attempt's writes. Cancelling
+	// here also drains the old attempt's post-process subtasks, which would
+	// otherwise touch chunks this reparse is about to delete.
+	if cancelStale {
+		s.dequeueKnowledgeTasks(ctx, existing.ID)
+	}
 
 	// Allocate a fresh span tree attempt up front. Doing this BEFORE
 	// the cleanup + enqueue means: (a) the UI immediately sees a new
@@ -2756,7 +2778,7 @@ func (s *knowledgeService) ReparseKnowledge(
 			Attempt:                  reparseAttempt,
 		}
 
-		langfuse.InjectTracing(ctx, &taskPayload)
+		applyDocumentTaskCorrelation(ctx, &taskPayload)
 		payloadBytes, err := json.Marshal(taskPayload)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to marshal reparse task payload: %v", err)
@@ -2810,7 +2832,7 @@ func (s *knowledgeService) ReparseKnowledge(
 			Attempt:                  reparseAttempt,
 		}
 
-		langfuse.InjectTracing(ctx, &taskPayload)
+		applyDocumentTaskCorrelation(ctx, &taskPayload)
 		payloadBytes, err := json.Marshal(taskPayload)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to marshal file URL reparse task payload: %v", err)
@@ -2861,7 +2883,7 @@ func (s *knowledgeService) ReparseKnowledge(
 			Attempt:                  reparseAttempt,
 		}
 
-		langfuse.InjectTracing(ctx, &taskPayload)
+		applyDocumentTaskCorrelation(ctx, &taskPayload)
 		payloadBytes, err := json.Marshal(taskPayload)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to marshal URL reparse task payload: %v", err)
