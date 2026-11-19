@@ -2761,7 +2761,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   justify-content: center;
   padding: 24px;
   box-sizing: border-box;
-  background: color-mix(in srgb, var(--td-bg-color-container) 82%, transparent);
+  background: color-mix(in srgb, var(--td-bg-color-container) 55%, transparent);
   border: 2px dashed var(--td-brand-color);
   border-radius: 18px;
   pointer-events: none;
