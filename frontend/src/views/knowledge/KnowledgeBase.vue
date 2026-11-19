@@ -10,6 +10,7 @@ import KBInfoPopover from '@/components/KBInfoPopover.vue';
 import KBSwitcherDropdown from '@/components/KBSwitcherDropdown.vue';
 import { useUIStore } from '@/stores/ui';
 import { isCKnowledgeConsole } from '@/utils/ckConsole';
+import { MAX_FILE_SIZE_BYTES, MAX_FILE_SIZE_MB } from '@/utils';
 import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
 import { permissionCanEditKB, permissionCanManageKB } from '@/utils/kbPermission';
@@ -1840,7 +1841,18 @@ const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
 const handleUploadSourceFiles = (files: File[]) => {
   if (!ensureDocumentKbReady()) return;
   if (files.length === 0) return;
-  openUploadConfirmDialog(files);
+  // 50MB 是前端容器与服务端的实际单文件上限（外层 nginx 200m 不是瓶颈）。
+  // 超限文件在选完/拖入的这一刻就拦下，避免传完后才收到一段 413 HTML。
+  const oversized = files.filter(file => file.size > MAX_FILE_SIZE_BYTES);
+  const accepted = files.filter(file => file.size <= MAX_FILE_SIZE_BYTES);
+  if (oversized.length > 0) {
+    const names = oversized.slice(0, 3).map(file => file.name).join('、');
+    MessagePlugin.warning(
+      `已跳过 ${oversized.length} 个超过 ${MAX_FILE_SIZE_MB}MB 的文件：${names}${oversized.length > 3 ? ' 等' : ''}`,
+    );
+  }
+  if (accepted.length === 0) return;
+  openUploadConfirmDialog(accepted);
 };
 
 const handleUploadSourceUrl = (url: string) => {
