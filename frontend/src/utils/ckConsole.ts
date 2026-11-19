@@ -75,6 +75,17 @@ export function rememberPreferredTenant(id: number): void {
   }
 }
 
+/**
+ * 用户在下拉菜单里主动切换空间时调用。
+ *
+ * 宿主 `?tenant=` 写入的 preferred 优先级高于普通选择存储；不同步这里的话，
+ * 切换后的硬刷新会被宿主默认空间覆盖回去（表现为「切了没反应」）。
+ */
+export function rememberUserTenantChoice(id: number): void {
+  if (!isCKnowledgeConsole()) return
+  rememberPreferredTenant(id)
+}
+
 export function preferredTenant(): number | null {
   try {
     const raw = localStorage.getItem(PREFERRED_TENANT_KEY)

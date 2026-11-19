@@ -219,6 +219,7 @@ import {
   persistLastActiveTenantPreference,
   stashTenantSwitchToast,
 } from '@/utils/tenantSwitch'
+import { rememberUserTenantChoice } from '@/utils/ckConsole'
 import type { TenantInfo } from '@/api/tenant'
 import { useRoleLabel, useHomeTenant } from '@/composables/useRoleLabel'
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
@@ -406,6 +407,7 @@ const switchToTenant = (m: Membership) => {
   const home = homeTenantId.value
   const switchingToHome = home !== null && home === m.tenant_id
   authStore.setSelectedTenant(m.tenant_id, tenantDisplayName(m))
+  rememberUserTenantChoice(m.tenant_id)
   closeAll()
   // Toast 在 reload 后由 App.vue 弹出（直接在这里弹会被 hard reload 干掉）。
   stashTenantSwitchToast({
