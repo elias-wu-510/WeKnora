@@ -311,6 +311,15 @@ const canEdit = computed(() => {
   return orgStore.canEditKB(kbId.value, false);
 });
 
+// 上传（新增文档）比编辑/删除更宽：同空间 contributor 也可以投稿，
+// 与后端 /knowledge-bases/:id/knowledge/file 的 Contributor 闸门对齐。
+// 跨空间分享仍只认显式 grant，避免借 tenant 角色越权写别人的库。
+const canUpload = computed(() => {
+  if (canEdit.value) return true;
+  if (isViaShare.value || isFAQ.value) return false;
+  return authStore.hasRole('contributor');
+});
+
 // Can manage (delete, settings, etc.): same permission-first rule. For
 // shared KBs only an 'admin' share grant qualifies — editor/viewer (and
 // even being the creator viewed via share) never grant delete/settings.
@@ -1241,6 +1250,9 @@ const handleKnowledgeFileDrop = (event: CustomEvent) => {
 // 从 /home 带参数进来时，等当前库信息与权限都就绪再直接打开文件选择器；
 // 打开后把 query 清掉，刷新页面不会重复弹窗。
 let uploadAutoOpenKbId: string | null = null;
+// 浏览器不允许「页面加载后无用户手势地弹系统文件选择器」，所以从首页带
+// ?upload=1 进来时先落在自建的投递面板里，由用户点「选择文件」或拖拽完成。
+const uploadEntryVisible = ref(false);
 
 const clearUploadQuery = () => {
   if (route.query.upload !== '1') return;
@@ -1261,7 +1273,7 @@ const maybeAutoOpenUploadPicker = async () => {
   if (route.query.upload !== '1') return;
   // 库信息就绪后先判权限：只读成员从首页点「上传」时给出明确提示，
   // 并把参数清掉，避免地址栏一直挂着 ?upload=1 却什么也没发生。
-  if (!kbLoading.value && kbInfo.value && !isFAQ.value && !canEdit.value) {
+  if (!kbLoading.value && kbInfo.value && !isFAQ.value && !canUpload.value) {
     if (uploadAutoOpenKbId !== kbId.value) {
       uploadAutoOpenKbId = kbId.value;
       MessagePlugin.warning('你没有该知识库的上传权限，请联系空间管理员');
@@ -1269,7 +1281,7 @@ const maybeAutoOpenUploadPicker = async () => {
     clearUploadQuery();
     return;
   }
-  if (kbLoading.value || !kbInfo.value || isFAQ.value || !canEdit.value) return;
+  if (kbLoading.value || !kbInfo.value || isFAQ.value || !canUpload.value) return;
   if (uploadAutoOpenKbId === kbId.value) return;
   uploadAutoOpenKbId = kbId.value;
   // 上传入口只存在于「文档」tab 的工具栏里：wiki 库带参数进来时先切回文档。
@@ -1282,12 +1294,24 @@ const maybeAutoOpenUploadPicker = async () => {
     uploadAutoOpenKbId = null;
     return;
   }
-  uploadSourceRef.value.openFileDialog();
+  uploadEntryVisible.value = true;
   clearUploadQuery();
 };
 
+// 投递面板：选择文件或拖入文件后关闭面板，接既有上传确认流程。
+const onUploadEntryDrop = (event: DragEvent) => {
+  const files = Array.from(event.dataTransfer?.files || []);
+  uploadEntryVisible.value = false;
+  if (files.length) handleUploadSourceFiles(files);
+};
+const openUploadEntryPicker = () => {
+  if (uploadSourceRef.value?.openFileDialog()) {
+    uploadEntryVisible.value = false;
+  }
+};
+
 watch(
-  [() => route.query.upload, kbLoading, canEdit, isFAQ, () => kbInfo.value?.id],
+  [() => route.query.upload, kbLoading, canUpload, isFAQ, () => kbInfo.value?.id],
   () => { void maybeAutoOpenUploadPicker(); },
   { immediate: true },
 );
@@ -1296,17 +1320,17 @@ watch(
 // 真正的落盘由 platform shell 的全局 drop 处理（派发 weknora:knowledge-file-drop，
 // 本页 handleKnowledgeFileDrop 复用上传确认流程）；这里只负责遮罩与文案。
 const fileDragDepth = ref(0);
-const fileDragActive = computed(() => fileDragDepth.value > 0 && canEdit.value && !isFAQ.value);
+const fileDragActive = computed(() => fileDragDepth.value > 0 && canUpload.value && !isFAQ.value);
 const dragCarriesFiles = (event: DragEvent) => {
   const types = event.dataTransfer?.types;
   return !!types && Array.from(types).includes('Files');
 };
 const handleKbDragEnter = (event: DragEvent) => {
-  if (!dragCarriesFiles(event) || !canEdit.value) return;
+  if (!dragCarriesFiles(event) || !canUpload.value) return;
   fileDragDepth.value += 1;
 };
 const handleKbDragOver = (event: DragEvent) => {
-  if (!dragCarriesFiles(event) || !canEdit.value) return;
+  if (!dragCarriesFiles(event) || !canUpload.value) return;
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
   if (fileDragDepth.value === 0) fileDragDepth.value = 1;
 };
@@ -2592,7 +2616,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                       </button>
                     </t-tooltip>
                   </div>
-                  <div v-if="canEdit" class="doc-filter-actions">
+                  <div v-if="canUpload" class="doc-filter-actions">
                     <KbUploadSourceDropdown ref="uploadSourceRef" :accept-file-types="acceptFileTypes"
                       :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="add" :trigger-label="t('knowledgeBase.addDocument')"
                       trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
@@ -2738,6 +2762,35 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
     :confirm-loading="batchTagging"
     @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm" />
 
+  <t-dialog
+    v-model:visible="uploadEntryVisible"
+    header="上传资料"
+    :footer="false"
+    width="520px"
+    placement="center"
+  >
+    <div class="ck-upload-entry">
+      <p class="ck-upload-entry__target">
+        目标知识库：<strong>{{ kbInfo?.name || '当前知识库' }}</strong>
+      </p>
+      <div
+        class="ck-upload-entry__dropzone"
+        @dragover.prevent
+        @drop.stop.prevent="onUploadEntryDrop"
+      >
+        <span class="ck-upload-entry__icon">
+          <t-icon name="upload" size="28px" />
+        </span>
+        <p class="ck-upload-entry__title">把文件拖到这里</p>
+        <t-button theme="primary" @click="openUploadEntryPicker">选择文件</t-button>
+      </div>
+      <p class="ck-upload-entry__tip">
+        支持 PDF、Word、Excel、PPT、Markdown、纯文本等格式，单个文件不超过 {{ MAX_FILE_SIZE_MB }}MB。
+        选好后会先打开上传确认，可设置标签与解析方式。
+      </p>
+    </div>
+  </t-dialog>
+
 </template>
 <style>
 /* 下拉菜单容器样式已统一至 @/assets/dropdown-menu.less */
@@ -2764,6 +2817,53 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 }
 
 // 拖拽遮罩：盖住页面内容区（含全局上传遮罩），用中文文案说明落点。
+.ck-upload-entry__target {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--td-text-color-secondary);
+}
+
+.ck-upload-entry__target strong {
+  color: var(--td-text-color-primary);
+  font-weight: 600;
+}
+
+.ck-upload-entry__dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 16px;
+  border: 1px dashed var(--td-brand-color-4);
+  border-radius: 10px;
+  background: var(--td-brand-color-1);
+  text-align: center;
+}
+
+.ck-upload-entry__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--td-bg-color-container);
+  color: var(--td-brand-color);
+}
+
+.ck-upload-entry__title {
+  margin: 0;
+  font-size: 14px;
+  color: var(--td-text-color-primary);
+}
+
+.ck-upload-entry__tip {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--td-text-color-placeholder);
+}
+
 .kb-drop-overlay {
   position: absolute;
   inset: 0;
