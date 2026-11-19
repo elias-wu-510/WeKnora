@@ -231,13 +231,13 @@
                 </t-button>
               </div>
 
-              <div v-if="oidcEnabled" class="oidc-divider">
+              <div v-if="ssoLoginAvailable" class="oidc-divider">
                 <span>{{ $t('auth.orContinueWith') }}</span>
               </div>
 
-              <t-button v-if="oidcEnabled" theme="default" size="large" block :loading="oidcLoading" :disabled="loading"
-                class="oidc-button" @click="handleOIDCLogin">
-                {{ oidcLoading ? $t('auth.redirectingToOIDC') : oidcLoginText }}
+              <t-button v-if="ssoLoginAvailable" theme="default" size="large" block :loading="oidcLoading"
+                :disabled="loading" class="oidc-button" @click="handleSSOLogin">
+                {{ oidcLoading ? $t('auth.redirectingToOIDC') : ssoLoginText }}
               </t-button>
             </t-form>
 
@@ -353,6 +353,7 @@ import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
 import { newPasswordRules } from '@/utils/passwordPolicy'
 import { afterLoginPath, isCKnowledgeConsole, resolveTenantSelection } from '@/utils/ckConsole'
+import { getApiBaseUrl } from '@/utils/api-base'
 import ckLogo from '@/assets/img/ck-logo.svg'
 import { Swiper, SwiperSlide } from 'swiper/vue'
 import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
@@ -425,6 +426,9 @@ const isRegisterMode = ref(false)
 const showLanguageMenu = ref(false)
 const oidcEnabled = ref(false)
 const oidcProviderName = ref('')
+// 飞书（中海通）直连登录：仅 C-Knowledge 控制台且后端返回 feishu_enabled=true
+// 时启用。默认 false，接口失败/老版本后端不返回该字段时保持原 SAI 登录路径。
+const feishuEnabled = ref(false)
 // registrationEnabled defaults to true so that on first paint the Register
 // link is visible; the actual mode is fetched from /auth/config in onMounted.
 // In invite_only mode the link/card are hidden.
@@ -460,6 +464,15 @@ const oidcLoginText = computed(() => {
   }
   return t('auth.oidcLogin')
 })
+// 飞书直连只在 C-Knowledge 控制台且后端明确 feishu_enabled=true 时生效；
+// 非 CK 部署与未配置飞书的环境继续走原有 OIDC（SAI）路径。
+const feishuLoginEnabled = computed(() => isCkConsole && feishuEnabled.value)
+// 飞书可用时即使 OIDC 未开启也要露出 SSO 按钮：两者回调格式一致，
+// 后端只需配置飞书即可登录，不强制同时开启 OIDC。
+const ssoLoginAvailable = computed(() => feishuLoginEnabled.value || oidcEnabled.value)
+const ssoLoginText = computed(() =>
+  feishuLoginEnabled.value ? t('auth.feishuLogin') : oidcLoginText.value,
+)
 const currentLangOption = computed(() => languageOptions.find(l => l.value === currentLanguage.value))
 
 // Login form data
@@ -638,10 +651,35 @@ const loadAuthConfig = async () => {
     const response = await getAuthConfig()
     registrationEnabled.value = response.registration_mode !== 'invite_only'
     complexPasswordEnabled.value = response.complex_password_enabled
+    feishuEnabled.value = response.feishu_enabled === true
   } catch {
     registrationEnabled.value = true
     complexPasswordEnabled.value = false
+    feishuEnabled.value = false
   }
+}
+
+// 飞书登录是整页跳转：后端 /auth/feishu/start 302 到飞书登录页，回调完成后
+// 浏览器回到 `${BASE_URL}/#oidc_result=...`，由 App.vue 的 syncOIDCUserContext
+// 兑换，与现有 OIDC 完全同一条落地路径。
+const handleFeishuLogin = () => {
+  try {
+    // 与 OIDC 一致：分享链接落地后跳外部 IdP 会丢 query 参数，先暂存邀请 token。
+    if (inviteToken.value) {
+      sessionStorage.setItem('weknora_pending_invite_token', inviteToken.value)
+    }
+  } catch {
+    /* 隐私模式下 sessionStorage 不可写，忽略，不阻塞登录 */
+  }
+  window.location.href = `${getApiBaseUrl()}/api/v1/auth/feishu/start`
+}
+
+const handleSSOLogin = () => {
+  if (feishuLoginEnabled.value) {
+    handleFeishuLogin()
+    return
+  }
+  handleOIDCLogin()
 }
 
 const handleOIDCLogin = async () => {
@@ -822,6 +860,7 @@ onMounted(async () => {
     const cfg = await getAuthConfig()
     const inviteOnly = cfg.registration_mode === 'invite_only'
     registrationEnabled.value = !inviteOnly
+    feishuEnabled.value = cfg.feishu_enabled === true
     isRegisterMode.value = !inviteOnly
     loadOIDCConfig()
     return

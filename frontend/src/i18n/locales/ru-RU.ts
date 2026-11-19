@@ -5104,6 +5104,7 @@ export default {
     logout: 'Выход',
     oidcLogin: 'Войти через OIDC',
     oidcLoginWithProvider: 'Войти через {provider}',
+    feishuLogin: 'Войти через Zhonghaitong',
     redirectingToOIDC: 'Перенаправление к поставщику удостоверений...',
     orContinueWith: 'Или продолжить с помощью',
     oidcLoginFailed: 'Ошибка входа через OIDC',

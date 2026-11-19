@@ -2471,6 +2471,7 @@ export default {
     logout: 'ログアウト',
     oidcLogin: 'OIDCでログイン',
     oidcLoginWithProvider: '{provider}でログイン',
+    feishuLogin: '中海通でログイン',
     redirectingToOIDC: 'IDプロバイダにリダイレクトしています...',
     orContinueWith: 'または次の方法で続行',
     oidcLoginFailed: 'OIDCログインに失敗しました',
