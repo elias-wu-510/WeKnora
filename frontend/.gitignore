@@ -31,3 +31,4 @@ coverage
 *.sw?
 
 *.tsbuildinfo
+frontend/dist-c-knowledge-test/
