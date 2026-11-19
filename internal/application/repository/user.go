@@ -86,6 +86,22 @@ func (r *userRepository) GetUserByEmail(ctx context.Context, email string) (*typ
 	return &user, nil
 }
 
+// GetUserByFeishuOpenID gets the user bound to a Feishu open_id. An empty
+// open_id never matches (all accounts predate Feishu login and store NULL).
+func (r *userRepository) GetUserByFeishuOpenID(ctx context.Context, openID string) (*types.User, error) {
+	if openID == "" {
+		return nil, ErrUserNotFound
+	}
+	var user types.User
+	if err := r.db.WithContext(ctx).Where("feishu_open_id = ?", openID).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
 // GetUserByUsername gets a user by username
 func (r *userRepository) GetUserByUsername(ctx context.Context, username string) (*types.User, error) {
 	var user types.User

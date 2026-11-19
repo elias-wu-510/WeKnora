@@ -106,6 +106,12 @@ type User struct {
 	// Stored as JSON (jsonb on Postgres, TEXT on SQLite) via the
 	// driver.Valuer / sql.Scanner methods on UserPreferences.
 	Preferences UserPreferences `json:"preferences" gorm:"type:jsonb;not null;default:'{}'"`
+	// FeishuOpenID is the stable Feishu (Lark) open_id this account is
+	// bound to, or nil for accounts that never used Feishu login. It is
+	// deliberately NOT serialised: it is an auth-internal identifier.
+	// Uniqueness is enforced by a partial unique index created in the
+	// database migrations (NULL/empty values are not constrained).
+	FeishuOpenID *string `json:"-" gorm:"type:varchar(128)"`
 	// Creation time of the user
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time of the user

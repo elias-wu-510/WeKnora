@@ -860,6 +860,7 @@ func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 		"success":                  true,
 		"registration_mode":        mode,
 		"complex_password_enabled": complexPasswordEnabled,
+		"feishu_enabled":           h.feishuEnabled(),
 	})
 }
 
