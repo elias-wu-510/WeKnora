@@ -77,7 +77,9 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
     @confirm="emit('reparse')">
     <div class="doc-action-menu-item" @click.stop>
       <t-icon class="icon" name="refresh" />
-      <span>{{ $t('knowledgeBase.rebuildDocument') }}</span>
+      <span>{{ item.parse_status === 'failed' || item.parse_status === 'cancelled'
+        ? $t('knowledgeStages.retry')
+        : $t('knowledgeBase.rebuildDocument') }}</span>
     </div>
   </t-popconfirm>
 

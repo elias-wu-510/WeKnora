@@ -6,7 +6,9 @@ import KnowledgeTagPopover from './KnowledgeTagPopover.vue';
 import DocumentFileIcon from './DocumentFileIcon.vue';
 import DocumentActionMenu from './DocumentActionMenu.vue';
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
-import { shownStall } from '@/utils/knowledgeProcessingStall';
+import ParseStatusBadge from './ParseStatusBadge.vue';
+import ParseDetailDrawer from './ParseDetailDrawer.vue';
+import { resolveParseStatus } from '../utils/parseStatus';
 
 interface Tag {
   id: string;
@@ -32,6 +34,8 @@ interface KnowledgeItem {
   isMore?: boolean;
   stalled_minutes?: number;
   stall_state?: string;
+  error_message?: string;
+  created_at?: string;
 }
 
 const props = defineProps<{
@@ -79,6 +83,27 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const tagEditorId = ref<string | null>(null);
+const parseDetailItem = ref<KnowledgeItem | null>(null);
+const parseDetailVisible = computed({
+  get: () => parseDetailItem.value !== null,
+  set: (visible: boolean) => {
+    if (!visible) parseDetailItem.value = null;
+  },
+});
+const parseStatus = (item: KnowledgeItem) => resolveParseStatus(item);
+const openParseDetail = (item: KnowledgeItem) => {
+  parseDetailItem.value = item;
+};
+const onDetailReparse = () => {
+  const item = parseDetailItem.value;
+  parseDetailItem.value = null;
+  if (item) emit('action', 'reparse', item);
+};
+const onDetailCancelParse = () => {
+  const item = parseDetailItem.value;
+  parseDetailItem.value = null;
+  if (item) emit('action', 'cancel-parse', item);
+};
 
 const formatTime = (time?: string) => {
   if (!time) return '--';
@@ -113,76 +138,6 @@ const getSourceInfo = (item: KnowledgeItem): { icon: string; label: string } => 
   if (item.type === 'manual') return { icon: 'edit', label: t('knowledgeBase.channelManual') };
   return { icon: 'upload', label: t('knowledgeBase.channelUpload') };
 };
-
-interface StatusInfo {
-  label: string;
-  theme: 'success' | 'warning' | 'danger' | 'primary' | 'default';
-  icon?: string;
-  spin?: boolean;
-  hint?: string;
-}
-const computeStatus = (item: KnowledgeItem): StatusInfo => {
-  const stall = shownStall(item.stall_state, item.stalled_minutes);
-  if (stall === 'queued') {
-    return {
-      label: t('knowledgeBase.statusQueued'),
-      theme: 'default',
-      icon: 'time',
-      hint: t('knowledgeBase.queuedHint', { minutes: item.stalled_minutes }),
-    };
-  }
-  if (stall === 'stalled') {
-    return {
-      label: t('knowledgeBase.statusStalled'),
-      theme: 'warning',
-      icon: 'time',
-      hint: t('knowledgeBase.stalledHint', { minutes: item.stalled_minutes }),
-    };
-  }
-  if (item.parse_status === 'pending' || item.parse_status === 'processing') {
-    return { label: t('knowledgeBase.statusProcessing'), theme: 'primary', icon: 'loading', spin: true };
-  }
-  // finalizing = primary parse done, enrichment subtasks still running.
-  // While in this phase, prefer the specific "summary generating" copy
-  // when summary is what's actually outstanding (preserves the old UX
-  // where this label was tied to completed+summary_pending). Otherwise
-  // fall back to the generic "finalizing" label — covers question gen
-  // and graph extract, which the user historically had no visibility on.
-  if (item.parse_status === 'finalizing') {
-    if (item.summary_status === 'pending' || item.summary_status === 'processing') {
-      return { label: t('knowledgeBase.generatingSummary'), theme: 'primary', icon: 'loading', spin: true };
-    }
-    return { label: t('knowledgeBase.statusFinalizing'), theme: 'primary', icon: 'loading', spin: true };
-  }
-  if (item.parse_status === 'failed') {
-    return { label: t('knowledgeBase.statusFailed'), theme: 'danger', icon: 'close-circle' };
-  }
-  if (item.parse_status === 'cancelled') {
-    return { label: t('knowledgeBase.statusCancelled'), theme: 'default', icon: 'stop-circle' };
-  }
-  if (item.parse_status === 'draft') {
-    return { label: t('knowledgeBase.statusDraft'), theme: 'warning' };
-  }
-  // Legacy completed+summary_pending path: kept as a defensive fallback
-  // for rows that bypassed finalizing (no enrichment configured, or
-  // upgraded mid-flight from a pre-finalizing build).
-  if (
-    item.parse_status === 'completed' &&
-    (item.summary_status === 'pending' || item.summary_status === 'processing')
-  ) {
-    return { label: t('knowledgeBase.generatingSummary'), theme: 'primary', icon: 'loading', spin: true };
-  }
-  if (item.parse_status === 'completed') {
-    return { label: t('knowledgeBase.statusCompleted'), theme: 'success' };
-  }
-  return { label: '--', theme: 'default' };
-};
-
-const statusByRow = computed(() => {
-  const map = new Map<string, StatusInfo>();
-  for (const item of props.items) map.set(item.id, computeStatus(item));
-  return map;
-});
 
 const allSelected = computed(() => {
   return props.items.length > 0 && props.items.every(i => props.selectedIds.has(i.id));
@@ -331,18 +286,23 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
         </div>
 
         <div class="cell cell-status" role="cell">
-          <template v-if="statusByRow.get(item.id) as StatusInfo | undefined">
-            <t-tag v-if="statusByRow.get(item.id)!.label !== '--'" size="small" :theme="statusByRow.get(item.id)!.theme"
-              variant="light" class="row-status-tag" :class="`status-${statusByRow.get(item.id)!.theme}`"
-              :title="statusByRow.get(item.id)!.hint">
-              <template v-if="statusByRow.get(item.id)!.icon" #icon>
-                <t-icon :name="statusByRow.get(item.id)!.icon!"
-                  :class="{ 'icon-spin': statusByRow.get(item.id)!.spin }" />
-              </template>
-              {{ statusByRow.get(item.id)!.label }}
-            </t-tag>
-            <span v-else class="row-muted">--</span>
-          </template>
+          <ParseStatusBadge
+            v-if="item.parse_status"
+            :item="item"
+            size="sm"
+            @open-detail="openParseDetail(item)"
+          />
+          <span v-else class="row-muted">--</span>
+          <button
+            v-if="parseStatus(item).kind === 'failed' || parseStatus(item).kind === 'cancelled'"
+            type="button"
+            class="row-reparse-btn"
+            :title="`重新解析「${item.file_name}」`"
+            :aria-label="`重新解析「${item.file_name}」`"
+            @click.stop="emit('action', 'reparse', item)"
+          >
+            <t-icon name="refresh" />
+          </button>
         </div>
 
         <div class="cell cell-actions" role="cell" v-if="canEdit" @click.stop>
@@ -451,6 +411,13 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
       </div>
     </div>
   </div>
+
+  <ParseDetailDrawer
+    v-model:visible="parseDetailVisible"
+    :item="parseDetailItem"
+    @reparse="onDetailReparse"
+    @cancel-parse="onDetailCancelParse"
+  />
 </template>
 
 <style scoped lang="less">
@@ -479,7 +446,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 .doc-list-header,
 .doc-list-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) minmax(180px, 24%) 100px 28px;
+  grid-template-columns: 24px minmax(0, 1fr) minmax(180px, 24%) 128px 28px;
   align-items: center;
   column-gap: 12px;
   padding: 0 8px;
@@ -685,16 +652,32 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   color: var(--td-text-color-disabled);
 }
 
-.row-status-tag {
-  background: transparent;
-  border: 0;
+.cell-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.row-reparse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
   padding: 0;
+  border: 0;
+  border-radius: var(--app-radius-xs);
+  background: transparent;
   color: var(--td-text-color-secondary);
-  &.status-success::before { content: ''; width: 5px; height: 5px; margin-right: 6px; border-radius: 50%; background: var(--td-success-color); }
-  &.status-danger { color: var(--td-error-color); }
-  &.status-warning { color: var(--td-warning-color); }
-  &.status-primary { color: var(--td-brand-color); }
-  &.status-default { color: var(--td-text-color-placeholder); }
+  font-size: 14px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-bg-color-component-hover);
+    color: var(--td-brand-color);
+  }
 }
 .row-title-line { display: flex; align-items: center; min-width: 0; }
 .row-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; width: 100%; }
@@ -744,14 +727,6 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   width: 100%; border: 0; background: transparent; text-align: left; font-family: inherit; cursor: pointer;
   &:hover { background: var(--td-bg-color-container-hover); }
 }
-.row-status-tag :deep(.t-icon) {
-  margin-right: 2px;
-}
-
-.icon-spin {
-  animation: wk-spin 0.9s linear infinite;
-}
-
 .row-more-btn {
   width: 28px;
   height: 28px;
@@ -788,6 +763,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 .row-file-name:focus-visible,
 .row-file-folder:focus-visible,
 .row-more-btn:focus-visible,
+.row-reparse-btn:focus-visible,
 .row-tag:focus-visible,
 .row-tag-add:focus-visible {
   outline: 2px solid var(--app-focus-border);
@@ -796,7 +772,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 }
 @container doc-card-area (max-width: 720px) {
   .doc-list-header, .doc-list-row {
-    grid-template-columns: 24px minmax(0, 1fr) 100px 28px;
+    grid-template-columns: 24px minmax(0, 1fr) 116px 28px;
     column-gap: 8px;
   }
   .doc-list-header .cell-tags { display: none; }
@@ -811,6 +787,6 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   .row-more-btn { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .doc-list-view, .icon-spin { animation: none; }
+  .doc-list-view { animation: none; }
 }
 </style>
