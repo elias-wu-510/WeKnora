@@ -8,7 +8,9 @@ import DocumentFileIcon from './DocumentFileIcon.vue';
 import DocumentActionMenu from './DocumentActionMenu.vue';
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
-import { shownStall } from '@/utils/knowledgeProcessingStall';
+import ParseStatusBadge from './ParseStatusBadge.vue';
+import ParseDetailDrawer from './ParseDetailDrawer.vue';
+import { resolveParseStatus, summarizeParseError } from '../utils/parseStatus';
 
 interface KnowledgeCard {
   id: string;
@@ -78,6 +80,13 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const tagEditorId = ref<string | null>(null);
+const parseDetailItem = ref<KnowledgeCard | null>(null);
+const parseDetailVisible = computed({
+  get: () => parseDetailItem.value !== null,
+  set: (visible: boolean) => {
+    if (!visible) parseDetailItem.value = null;
+  },
+});
 const cardSummaries = computed(() => new Map(props.items.map(item => [item.id, formatReferenceSnippet(item.description)])));
 
 // Which row's action popup is currently showing the folder picker. Kept local so
@@ -114,16 +123,32 @@ const isTraceMenuVisible = (item: KnowledgeCard): boolean => {
   return props.traceAvailableById[item.id] === true;
 };
 
-const inFlightCardStatusText = (item: KnowledgeCard): string => {
-  const stall = shownStall(item.stall_state, item.stalled_minutes);
-  if (stall) return t(stall === 'queued' ? 'knowledgeBase.statusQueued' : 'knowledgeBase.statusStalled');
-  if (item.parse_status === 'finalizing') {
-    if (item.summary_status === 'pending' || item.summary_status === 'processing') {
-      return t('knowledgeBase.generatingSummary');
-    }
-    return t('knowledgeBase.statusFinalizing');
-  }
-  return t('knowledgeBase.parsingInProgress');
+const parseStatus = (item: KnowledgeCard) => resolveParseStatus(item);
+const parseErrorSummary = (item: KnowledgeCard): string =>
+  summarizeParseError(item.error_message).summary;
+
+const cardStatusNote = (item: KnowledgeCard): string => {
+  const view = resolveParseStatus(item);
+  if (view.kind === 'stalled') return '建议停止后重新解析';
+  if (view.kind === 'queued') return '等待解析服务处理';
+  if (view.kind === 'finalizing') return '解析即将完成';
+  return '页面会自动刷新';
+};
+
+const openParseDetail = (item: KnowledgeCard) => {
+  parseDetailItem.value = item;
+};
+
+const onDetailReparse = () => {
+  const item = parseDetailItem.value;
+  parseDetailItem.value = null;
+  if (item) handleAction('reparse', item);
+};
+
+const onDetailCancelParse = () => {
+  const item = parseDetailItem.value;
+  parseDetailItem.value = null;
+  if (item) handleAction('cancel-parse', item);
 };
 
 // --- Display helpers ---
@@ -483,22 +508,27 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
 
         <div class="card-preview" @mouseenter="onCardMouseEnter($event, item)" @mouseleave="onCardMouseLeave">
         <!-- Parse status display -->
-        <div v-if="isParseInFlight(item.parse_status)" class="card-analyze card-analyze-trace"
-          :class="shownStall(item.stall_state, item.stalled_minutes)">
-          <t-icon :name="shownStall(item.stall_state, item.stalled_minutes) ? 'time' : 'loading'"
-            class="card-analyze-loading"></t-icon>
-          <span
-            class="card-analyze-txt card-analyze-trace-link"
-            role="button"
-            tabindex="0"
-            :title="shownStall(item.stall_state, item.stalled_minutes)
-              ? $t(shownStall(item.stall_state, item.stalled_minutes) === 'queued'
-                ? 'knowledgeBase.queuedHint' : 'knowledgeBase.stalledHint', { minutes: item.stalled_minutes })
-              : $t('knowledgeStages.viewTrace')"
-            @click.stop="handleAction('view-trace', item)"
-            @keydown.enter.stop="handleAction('view-trace', item)"
-            @keydown.space.prevent.stop="handleAction('view-trace', item)"
-          >{{ inFlightCardStatusText(item) }}</span>
+        <div
+          v-if="parseStatus(item).kind === 'stalled'"
+          class="card-analyze card-analyze-trace card-status-stalled"
+        >
+          <div class="card-status-head">
+            <ParseStatusBadge :item="item" size="md" @open-detail="openParseDetail(item)" />
+            <button
+              type="button"
+              class="card-analyze-trace-btn"
+              :title="$t('knowledgeStages.viewTrace')"
+              :aria-label="$t('knowledgeStages.viewTrace')"
+              @click.stop="handleAction('view-trace', item)"
+            >
+              <t-icon name="chart-line" />
+            </button>
+          </div>
+          <div class="card-failure-text card-stall-text">建议停止后重新解析</div>
+        </div>
+        <div v-else-if="parseStatus(item).inFlight" class="card-analyze card-analyze-trace">
+          <ParseStatusBadge :item="item" size="md" @open-detail="openParseDetail(item)" />
+          <span class="card-analyze-txt" :title="parseStatus(item).hint">{{ cardStatusNote(item) }}</span>
           <button
             type="button"
             class="card-analyze-trace-btn"
@@ -509,41 +539,40 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
             <t-icon name="chart-line" />
           </button>
         </div>
-        <div v-else-if="item.parse_status === 'failed'" class="card-analyze failure card-analyze-trace">
-          <t-icon name="close-circle" class="card-analyze-loading failure"></t-icon>
-          <span
-            class="card-analyze-txt failure card-analyze-trace-link"
-            role="button"
-            tabindex="0"
-            :title="$t('knowledgeStages.viewTrace')"
-            @click.stop="handleAction('view-trace', item)"
-            @keydown.enter.stop="handleAction('view-trace', item)"
-            @keydown.space.prevent.stop="handleAction('view-trace', item)"
-          >{{ $t('knowledgeBase.parsingFailed') }}</span>
-          <button
-            type="button"
-            class="card-analyze-trace-btn"
-            :title="$t('knowledgeStages.viewTrace')"
-            :aria-label="$t('knowledgeStages.viewTrace')"
-            @click.stop="handleAction('view-trace', item)"
-          >
-            <t-icon name="chart-bar" />
-          </button>
-        </div>
-        <div v-else-if="item.parse_status === 'draft'" class="card-draft">
-          <t-tag size="small" theme="warning" variant="light-outline">{{ $t('knowledgeBase.draft') }}</t-tag>
-          <span class="card-draft-tip">{{ $t('knowledgeBase.draftTip') }}</span>
-        </div>
         <div
-          v-else-if="item.parse_status === 'completed' && (item.summary_status === 'pending' || item.summary_status === 'processing')"
-          class="card-analyze"
+          v-else-if="parseStatus(item).kind === 'failed'"
+          class="card-analyze failure card-analyze-trace card-status-failed"
         >
-          <t-icon name="loading" class="card-analyze-loading"></t-icon>
-          <span class="card-analyze-txt">{{ $t('knowledgeBase.generatingSummary') }}</span>
+          <div class="card-status-head">
+            <ParseStatusBadge :item="item" size="md" @open-detail="openParseDetail(item)" />
+            <button type="button" class="card-reparse-link" @click.stop="handleAction('reparse', item)">
+              重新解析
+            </button>
+            <button
+              type="button"
+              class="card-analyze-trace-btn"
+              :title="$t('knowledgeStages.viewTrace')"
+              :aria-label="$t('knowledgeStages.viewTrace')"
+              @click.stop="handleAction('view-trace', item)"
+            >
+              <t-icon name="chart-bar" />
+            </button>
+          </div>
+          <div class="card-failure-text" :title="parseErrorSummary(item)">{{ parseErrorSummary(item) }}</div>
         </div>
-        <div v-else-if="item.parse_status === 'cancelled'" class="card-analyze card-cancelled">
-          <t-icon name="stop-circle" />
-          <span>{{ t('knowledgeBase.statusCancelled') }}</span>
+        <div v-else-if="parseStatus(item).kind === 'draft'" class="card-draft">
+          <ParseStatusBadge :item="item" size="md" @open-detail="openParseDetail(item)" />
+          <span class="card-draft-tip">草稿尚未提交解析</span>
+        </div>
+        <div v-else-if="parseStatus(item).kind === 'summary'" class="card-analyze">
+          <ParseStatusBadge :item="item" size="md" @open-detail="openParseDetail(item)" />
+          <span class="card-analyze-txt">正在生成摘要，页面会自动刷新</span>
+        </div>
+        <div v-else-if="parseStatus(item).kind === 'cancelled'" class="card-analyze card-cancelled">
+          <ParseStatusBadge :item="item" size="md" @open-detail="openParseDetail(item)" />
+          <button type="button" class="card-reparse-link" @click.stop="handleAction('reparse', item)">
+            重新解析
+          </button>
         </div>
         <div v-else class="card-content-txt" :class="{ 'is-empty': !cardSummaries.get(item.id) }">
           {{ cardSummaries.get(item.id) || t('knowledgeBase.noDocumentSummary') }}
@@ -576,10 +605,24 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
           <span>{{ item.folder_path }}</span>
         </button>
         <span v-else class="card-time" :title="t('knowledgeBase.columnUpdatedAt')">{{ formatDocTime(item.updated_at) }}</span>
+        <ParseStatusBadge
+          v-if="parseStatus(item).kind === 'completed'"
+          class="card-status-quiet"
+          :item="item"
+          size="sm"
+          @open-detail="openParseDetail(item)"
+        />
       </div>
     </div>
     </div>
   </div>
+
+  <ParseDetailDrawer
+    v-model:visible="parseDetailVisible"
+    :item="parseDetailItem"
+    @reparse="onDetailReparse"
+    @cancel-parse="onDetailCancelParse"
+  />
 
   <!-- Hover popover -->
   <Teleport to="body">
@@ -773,6 +816,8 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     line-height: 18px;
   }
   .card-time { flex-shrink: 0; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .card-status-quiet { flex-shrink: 0; margin-left: auto; }
+  .card-time + .card-status-quiet { margin-left: 0; }
   .card-tags-anchor { flex: 1; min-width: 0; width: auto; }
   .card-folder {
     display: inline-flex;
@@ -850,8 +895,31 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   &:hover { background: var(--td-bg-color-component-hover); }
 }
 .card-analyze.failure { color: var(--td-error-color); }
-.card-analyze.stalled { color: var(--td-warning-color); }
-.card-analyze.queued { color: var(--td-text-color-secondary); }
+.card-analyze .card-analyze-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-status-stalled { flex-direction: column; align-items: stretch; gap: 2px; }
+.card-stall-text { color: var(--td-warning-color); }
+.card-status-failed { flex-direction: column; align-items: stretch; gap: 2px; }
+.card-status-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.card-status-head .card-analyze-trace-btn { margin-left: auto; }
+.card-failure-text {
+  overflow: hidden;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-xs);
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-reparse-link {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--td-brand-color);
+  font: inherit;
+  font-size: var(--app-text-xs);
+  cursor: pointer;
+  &:hover { text-decoration: underline; }
+}
 .card-draft { color: var(--td-warning-color); }
 .card-cancelled { color: var(--td-text-color-placeholder); }
 .card-draft-tip { font-size: var(--app-text-xs); }
