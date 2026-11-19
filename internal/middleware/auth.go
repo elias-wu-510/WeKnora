@@ -51,6 +51,10 @@ var noAuthAPI = map[string][]string{
 	"/api/v1/auth/oidc/url":           {"GET"},
 	"/api/v1/auth/oidc/start":         {"GET"},
 	"/api/v1/auth/oidc/callback":      {"GET"},
+	// C-Knowledge 直连飞书登录：发起与回调都发生在未登录状态，靠一次性
+	// state + nonce cookie 鉴权，因此必须放行全局 Auth 中间件。
+	"/api/v1/auth/feishu/start":    {"GET"},
+	"/api/v1/auth/feishu/callback": {"GET"},
 	// MCP OAuth provider redirect: the third-party authorization server
 	// redirects the browser here without a WeKnora bearer token. The request
 	// is authenticated by the opaque, single-use `state` parameter instead.
