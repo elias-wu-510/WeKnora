@@ -60,6 +60,15 @@ type KnowledgeBaseService interface {
 	// ListKnowledgeBasesByTenantID lists all knowledge bases for a specific tenant (e.g. for shared agent context).
 	ListKnowledgeBasesByTenantID(ctx context.Context, tenantID uint64) ([]*types.KnowledgeBase, error)
 
+	// ListKBMembers returns the per-KB grants visible to the caller.
+	ListKBMembers(ctx context.Context, kbID string) ([]*types.KBMember, error)
+	// KBMemberRole returns the caller's grant role, empty when none.
+	KBMemberRole(ctx context.Context, kbID, userID string) types.KBMemberRole
+	// UpsertKBMember grants or updates a member role on the KB.
+	UpsertKBMember(ctx context.Context, kbID, userID string, role types.KBMemberRole) (*types.KBMember, error)
+	// RemoveKBMember revokes a member's grant.
+	RemoveKBMember(ctx context.Context, kbID, userID string) error
+
 	// UpdateKnowledgeBase updates knowledge base information
 	// Parameters:
 	//   - ctx: Context information
@@ -205,6 +214,15 @@ type KnowledgeBaseRepository interface {
 	// ListKnowledgeBaseIDsForMember returns the kb_ids where userID has an
 	// explicit kb_members row (used to filter project-scope visibility).
 	ListKnowledgeBaseIDsForMember(ctx context.Context, userID string) ([]string, error)
+
+	// ListKBMembers returns the active per-KB grants for a knowledge base.
+	ListKBMembers(ctx context.Context, kbID string) ([]*types.KBMember, error)
+	// GetKBMember returns the active grant for (kb, user), or nil when absent.
+	GetKBMember(ctx context.Context, kbID, userID string) (*types.KBMember, error)
+	// UpsertKBMember creates or updates a grant.
+	UpsertKBMember(ctx context.Context, member *types.KBMember) (*types.KBMember, error)
+	// DeleteKBMember soft-deletes a grant.
+	DeleteKBMember(ctx context.Context, kbID, userID string) error
 
 	// UpdateKnowledgeBase updates a knowledge base record
 	// Parameters:

@@ -386,6 +386,58 @@ func (s *knowledgeBaseService) filterVisibleKnowledgeBases(
 	return visible
 }
 
+// ListKBMembers returns the per-KB grants. Visibility is enforced by
+// GetKnowledgeBaseByID, so a member who cannot see the KB gets 404.
+func (s *knowledgeBaseService) ListKBMembers(ctx context.Context, kbID string) ([]*types.KBMember, error) {
+	if _, err := s.GetKnowledgeBaseByID(ctx, kbID); err != nil {
+		return nil, err
+	}
+	return s.repo.ListKBMembers(ctx, kbID)
+}
+
+// KBMemberRole returns the caller's explicit grant for this KB ("" when none).
+func (s *knowledgeBaseService) KBMemberRole(ctx context.Context, kbID, userID string) types.KBMemberRole {
+	if userID == "" {
+		return ""
+	}
+	member, err := s.repo.GetKBMember(ctx, kbID, userID)
+	if err != nil || member == nil {
+		return ""
+	}
+	return member.Role
+}
+
+// UpsertKBMember grants a role on the KB. The handler is responsible for
+// checking that the caller administers this KB.
+func (s *knowledgeBaseService) UpsertKBMember(
+	ctx context.Context, kbID, userID string, role types.KBMemberRole,
+) (*types.KBMember, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, apperrors.NewBadRequestError("user_id is required")
+	}
+	if !role.IsValid() {
+		return nil, apperrors.NewBadRequestError("role must be viewer, contributor or admin")
+	}
+	kb, err := s.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.UpsertKBMember(ctx, &types.KBMember{
+		TenantID: kb.TenantID,
+		KBID:     kbID,
+		UserID:   userID,
+		Role:     role,
+	})
+}
+
+// RemoveKBMember revokes a grant. Handlers must check KB administration first.
+func (s *knowledgeBaseService) RemoveKBMember(ctx context.Context, kbID, userID string) error {
+	if _, err := s.GetKnowledgeBaseByID(ctx, kbID); err != nil {
+		return err
+	}
+	return s.repo.DeleteKBMember(ctx, kbID, userID)
+}
+
 // GetKnowledgeBaseByID retrieves a knowledge base by its ID
 func (s *knowledgeBaseService) GetKnowledgeBaseByID(ctx context.Context, id string) (*types.KnowledgeBase, error) {
 	if id == "" {

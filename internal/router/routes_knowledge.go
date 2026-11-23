@@ -265,6 +265,11 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 			GET("/copy/progress/:task_id", g.Viewer(), handler.GetKBCloneProgress)
 		// 获取可移动目标知识库列表 — Viewer+ 且对 KB 有 read 权限
 		kb.GET("/:id/move-targets", g.Viewer(), g.KBAccessRead("id"), handler.ListMoveTargets)
+		// 知识库成员（W3 项目库授权）：读走 KB read；写由 handler 校验库管理员
+		// （空间 admin/owner、KB owner/creator、kb_members admin）。
+		kb.GET("/:id/members", g.Viewer(), g.KBAccessRead("id"), handler.ListKBMembers)
+		kb.POST("/:id/members", g.Viewer(), g.KBAccessRead("id"), handler.AddKBMember)
+		kb.DELETE("/:id/members/:user_id", g.Viewer(), g.KBAccessRead("id"), handler.RemoveKBMember)
 	}
 }
 
