@@ -143,6 +143,25 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	// re-attribute.
 	if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
 		kb.CreatorID = uid
+		if kb.OwnerUserID == "" {
+			kb.OwnerUserID = uid
+		}
+	}
+	switch kb.Scope {
+	case "":
+		kb.Scope = types.KBScopePublic
+	case types.KBScopePublic, types.KBScopeProject, types.KBScopePersonal:
+	default:
+		return nil, apperrors.NewBadRequestError("scope must be public, project or personal")
+	}
+	caller := types.CallerFromContext(ctx)
+	if kb.Scope == types.KBScopePublic && caller.Role != types.TenantRoleAdmin && caller.Role != types.TenantRoleOwner {
+		// Contributors may create personal or project KBs; publishing a KB to
+		// the whole workspace stays an admin decision.
+		return nil, apperrors.NewForbiddenError("only workspace admins can create public knowledge bases")
+	}
+	if kb.Scope != types.KBScopePublic {
+		kb.OwnerUserID = kb.CreatorID
 	}
 	kb.EnsureDefaults()
 	applyTenantDefaultStorageProvider(ctx, kb)
@@ -298,6 +317,75 @@ func (s *knowledgeBaseService) validateVectorStoreBinding(
 	}
 }
 
+// kbVisibleToCaller reports whether the request's authenticated caller may
+// read this KB. kb_members is only consulted for project-scope KBs, so the
+// common public path costs no extra query.
+func (s *knowledgeBaseService) kbVisibleToCaller(ctx context.Context, kb *types.KnowledgeBase) bool {
+	caller := types.CallerFromContext(ctx)
+	if caller.UserID == "" {
+		return true // service/worker context
+	}
+	switch kb.NormalizedScope() {
+	case types.KBScopePersonal:
+		return kb.VisibleTo(caller, false)
+	case types.KBScopeProject:
+		return kb.VisibleTo(caller, s.isKBMember(ctx, caller.UserID, kb.ID))
+	default:
+		return true
+	}
+}
+
+func (s *knowledgeBaseService) isKBMember(ctx context.Context, userID, kbID string) bool {
+	ids, err := s.repo.ListKnowledgeBaseIDsForMember(ctx, userID)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to load kb_members for user %s: %v", userID, err)
+		return false
+	}
+	for _, id := range ids {
+		if id == kbID {
+			return true
+		}
+	}
+	return false
+}
+
+// filterVisibleKnowledgeBases drops personal KBs owned by someone else and
+// project KBs the caller is not a member of. One membership query serves the
+// whole list.
+func (s *knowledgeBaseService) filterVisibleKnowledgeBases(
+	ctx context.Context, kbs []*types.KnowledgeBase,
+) []*types.KnowledgeBase {
+	caller := types.CallerFromContext(ctx)
+	if caller.UserID == "" {
+		return kbs
+	}
+	visible := make([]*types.KnowledgeBase, 0, len(kbs))
+	memberIDs := map[string]struct{}{}
+	hasProject := false
+	for _, kb := range kbs {
+		if kb.NormalizedScope() == types.KBScopeProject {
+			hasProject = true
+			break
+		}
+	}
+	if hasProject {
+		ids, err := s.repo.ListKnowledgeBaseIDsForMember(ctx, caller.UserID)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to load kb_members for user %s: %v", caller.UserID, err)
+		}
+		for _, id := range ids {
+			memberIDs[id] = struct{}{}
+		}
+	}
+	for _, kb := range kbs {
+		_, isMember := memberIDs[kb.ID]
+		if kb.VisibleTo(caller, isMember) {
+			visible = append(visible, kb)
+		}
+	}
+	return visible
+}
+
 // GetKnowledgeBaseByID retrieves a knowledge base by its ID
 func (s *knowledgeBaseService) GetKnowledgeBaseByID(ctx context.Context, id string) (*types.KnowledgeBase, error) {
 	if id == "" {
@@ -311,6 +399,12 @@ func (s *knowledgeBaseService) GetKnowledgeBaseByID(ctx context.Context, id stri
 			"knowledge_base_id": id,
 		})
 		return nil, err
+	}
+
+	if !s.kbVisibleToCaller(ctx, kb) {
+		// Personal/project KBs outside the caller's scope must look absent,
+		// not forbidden, so the resource cannot be enumerated by ID probing.
+		return nil, repository.ErrKnowledgeBaseNotFound
 	}
 
 	kb.EnsureDefaults()
@@ -407,6 +501,8 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 			kb.ProcessingCount = processingCount
 		}
 	}
+
+	kbs = s.filterVisibleKnowledgeBases(ctx, kbs)
 
 	// Per-user pin stamping + ordering. The "main" list view is the
 	// only path that needs to honour the caller's personal pin set;

@@ -202,6 +202,10 @@ type KnowledgeBaseRepository interface {
 	//   - Possible errors such as database errors, etc.
 	ListKnowledgeBasesByTenantID(ctx context.Context, tenantID uint64) ([]*types.KnowledgeBase, error)
 
+	// ListKnowledgeBaseIDsForMember returns the kb_ids where userID has an
+	// explicit kb_members row (used to filter project-scope visibility).
+	ListKnowledgeBaseIDsForMember(ctx context.Context, userID string) ([]string, error)
+
 	// UpdateKnowledgeBase updates a knowledge base record
 	// Parameters:
 	//   - ctx: Context information

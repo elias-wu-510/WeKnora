@@ -272,3 +272,37 @@ func (r *knowledgeBaseRepository) ListModelUsages(
 	}
 	return usages, nil
 }
+
+// kbMemberRow mirrors the kb_members table (W3 per-KB ACL). It stays local to
+// the repository because callers only need the resulting kb_id set.
+type kbMemberRow struct {
+	ID        string     `gorm:"column:id;primaryKey"`
+	TenantID  uint64     `gorm:"column:tenant_id"`
+	KBID      string     `gorm:"column:kb_id"`
+	UserID    string     `gorm:"column:user_id"`
+	Role      string     `gorm:"column:role"`
+	CreatedAt time.Time  `gorm:"column:created_at"`
+	UpdatedAt time.Time  `gorm:"column:updated_at"`
+	DeletedAt *time.Time `gorm:"column:deleted_at"`
+}
+
+func (kbMemberRow) TableName() string { return "kb_members" }
+
+// ListKnowledgeBaseIDsForMember returns every kb_id the user has an active
+// kb_members row for. Visibility filtering then runs in memory over the
+// workspace's KBs, which keeps the list query unchanged for the common case.
+func (r *knowledgeBaseRepository) ListKnowledgeBaseIDsForMember(
+	ctx context.Context, userID string,
+) ([]string, error) {
+	if userID == "" {
+		return nil, nil
+	}
+	var ids []string
+	if err := r.db.WithContext(ctx).
+		Model(&kbMemberRow{}).
+		Where("user_id = ? AND deleted_at IS NULL", userID).
+		Pluck("kb_id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
+}

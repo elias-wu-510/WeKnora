@@ -35,6 +35,60 @@ const (
 	KnowledgeBaseTypeWiki     = "wiki"
 )
 
+// Knowledge-base visibility scopes. A KB belongs to one workspace (tenant) and
+// is additionally narrowed by its scope:
+//
+//	public   — every member of the workspace may read it
+//	project  — only explicit kb_members (and the owner/creator) may read it
+//	personal — only the owner may read it
+const (
+	KBScopePublic   = "public"
+	KBScopeProject  = "project"
+	KBScopePersonal = "personal"
+)
+
+// NormalizedScope returns the KB's effective scope. Empty or unknown values
+// are treated as public so rows written before migration 000116 keep their
+// previous workspace-wide visibility.
+func (kb *KnowledgeBase) NormalizedScope() string {
+	if kb == nil {
+		return KBScopePublic
+	}
+	switch kb.Scope {
+	case KBScopePersonal, KBScopeProject:
+		return kb.Scope
+	default:
+		return KBScopePublic
+	}
+}
+
+// VisibleTo reports whether caller may see this KB inside its workspace.
+// isMember says the caller has an explicit kb_members row for this KB.
+// An empty caller.UserID is a service/worker caller (no human identity) and is
+// not restricted; workspace admins keep management visibility over personal
+// and project KBs so they can still help their members.
+func (kb *KnowledgeBase) VisibleTo(caller Caller, isMember bool) bool {
+	if kb == nil {
+		return false
+	}
+	caller = caller.Normalize()
+	if caller.UserID == "" {
+		return true
+	}
+	if caller.Role == TenantRoleOwner || caller.Role == TenantRoleAdmin {
+		return true
+	}
+	switch kb.NormalizedScope() {
+	case KBScopePersonal:
+		return kb.OwnerUserID != "" && kb.OwnerUserID == caller.UserID
+	case KBScopeProject:
+		return isMember || (kb.OwnerUserID != "" && kb.OwnerUserID == caller.UserID) ||
+			(kb.CreatorID != "" && kb.CreatorID == caller.UserID)
+	default:
+		return true
+	}
+}
+
 // FAQIndexMode represents the FAQ index mode: only index questions or index questions and answers
 type FAQIndexMode string
 
@@ -69,6 +123,13 @@ type KnowledgeBase struct {
 	Description string `yaml:"description"             json:"description"`
 	// Workspace ID
 	TenantID uint64 `yaml:"tenant_id"               json:"tenant_id"`
+	// Scope narrows visibility inside the workspace: public / project / personal
+	// (see the KBScope* constants). Rows written before migration 000116 read
+	// as public.
+	Scope string `yaml:"scope"                   json:"scope"                   gorm:"type:varchar(16);default:'public';index"`
+	// OwnerUserID is the member this KB belongs to for personal/project scopes.
+	// Backfilled from CreatorID by migration 000116.
+	OwnerUserID string `yaml:"owner_user_id"           json:"owner_user_id"           gorm:"type:varchar(36);index"`
 	// CreatorID records the user ID of whoever originally created the KB.
 	// Used by the workspace-level RBAC middleware to let Contributors edit
 	// their own KBs without granting them access to everyone else's.
