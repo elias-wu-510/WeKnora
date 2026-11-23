@@ -183,6 +183,28 @@ type KnowledgeBaseConfig struct {
 	// leave knowledge in "processing". Default 30 minutes is generous enough
 	// for OCR-heavy large PDFs while ensuring forward progress.
 	DocReaderCallTimeout time.Duration `yaml:"docreader_call_timeout"   json:"docreader_call_timeout"`
+	// DeletedChunkRetentionDays is how long tombstoned chunks stay in the
+	// table before a daily sweep hard-deletes them.
+	//   nil  — default 7 days (see EffectiveDeletedChunkRetentionDays).
+	//   0    — disable the sweep entirely (rows are kept for manual archiving).
+	//   < 0  — invalid; ValidateConfig rejects it.
+	// Soft-deleted documents leave their chunks behind (GORM only stamps
+	// deleted_at), and nothing else ever reclaims that space, so a default
+	// that actually purges is the safer posture.
+	DeletedChunkRetentionDays *int `yaml:"deleted_chunk_retention_days" json:"deleted_chunk_retention_days,omitempty"`
+}
+
+// DefaultDeletedChunkRetentionDays applies when the operator does not set
+// deleted_chunk_retention_days at all.
+const DefaultDeletedChunkRetentionDays = 7
+
+// EffectiveDeletedChunkRetentionDays resolves the pointer field for callers
+// that only need the number. Explicit 0 (disable) survives; nil means default.
+func (c *KnowledgeBaseConfig) EffectiveDeletedChunkRetentionDays() int {
+	if c == nil || c.DeletedChunkRetentionDays == nil {
+		return DefaultDeletedChunkRetentionDays
+	}
+	return *c.DeletedChunkRetentionDays
 }
 
 // DefaultDocumentProcessTimeout is the ceiling for a single document:process
@@ -700,6 +722,13 @@ func ValidateConfig(cfg *Config) error {
 		}
 	}
 
+	if cfg.KnowledgeBase != nil && cfg.KnowledgeBase.DeletedChunkRetentionDays != nil &&
+		*cfg.KnowledgeBase.DeletedChunkRetentionDays < 0 {
+		errs = append(errs, fmt.Sprintf(
+			"knowledge_base.deleted_chunk_retention_days must be >= 0 (got %d); use 0 to disable the sweep",
+			*cfg.KnowledgeBase.DeletedChunkRetentionDays))
+	}
+
 	if cfg.Audit != nil && cfg.Audit.RetentionDays < 0 {
 		errs = append(errs, fmt.Sprintf("audit.retention_days must be >= 0 (got %d); use 0 to disable purge",
 			cfg.Audit.RetentionDays))
@@ -870,6 +899,11 @@ func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_DOCREADER_CALL_TIMEOUT")); value != "" {
 		if d, err := time.ParseDuration(value); err == nil && d > 0 {
 			cfg.KnowledgeBase.DocReaderCallTimeout = d
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_DELETED_CHUNK_RETENTION_DAYS")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+			cfg.KnowledgeBase.DeletedChunkRetentionDays = &n
 		}
 	}
 }

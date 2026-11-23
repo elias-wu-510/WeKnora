@@ -234,6 +234,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewTenantInvitationService))
 	must(container.Provide(service.NewAuditLogService))
 	must(container.Provide(service.NewAuditLogRetentionRunner))
+	must(container.Provide(service.NewChunkRetentionRunner))
 	must(container.Provide(service.NewKnowledgeBaseService))
 	must(container.Provide(service.NewOrganizationService))
 	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
@@ -485,6 +486,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
 	must(container.Invoke(startAuditLogRetention))
 	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
+	must(container.Invoke(startChunkRetention))
+	logger.Debugf(ctx, "[Container] Chunk retention runner registered")
 	must(container.Provide(service.NewHousekeepingService))
 	must(container.Invoke(startHousekeepingService))
 	logger.Debugf(ctx, "[Container] Knowledge housekeeping runner registered")
@@ -2029,6 +2032,18 @@ func startAuditLogRetention(
 ) {
 	runner.Start(context.Background())
 	cleaner.RegisterWithName("AuditLogRetentionRunner", func() error {
+		runner.StopWithin(cleanupStepTimeout)
+		return nil
+	})
+}
+
+// startChunkRetention spins up the daily tombstoned-chunk purge sweep and
+// registers its shutdown hook, mirroring the audit-log runner.
+func startChunkRetention(
+	runner *service.ChunkRetentionRunner, cleaner interfaces.ResourceCleaner,
+) {
+	runner.Start(context.Background())
+	cleaner.RegisterWithName("ChunkRetentionRunner", func() error {
 		runner.StopWithin(cleanupStepTimeout)
 		return nil
 	})

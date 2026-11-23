@@ -1407,3 +1407,38 @@ func (r *chunkRepository) ListAllChunksByKnowledgeID(
 		Error
 	return chunks, err
 }
+
+// PurgeDeletedChunks hard-deletes tombstoned chunks whose deleted_at is older
+// than cutoff, in batches, and returns the number of rows removed. Live rows
+// (deleted_at IS NULL) are never touched.
+//
+// Soft-deleted documents leave their chunks behind: GORM's Delete only stamps
+// deleted_at, and retrieval filters those rows out, so without a sweep the
+// table grows forever (production hit 926k rows / 1.1 GB, 94% of them dead).
+// Batched deletion keeps each statement short enough not to hold a long lock;
+// the caller runs this daily with a multi-day retention horizon, so a partial
+// sweep is harmless — the next one simply continues.
+func (r *chunkRepository) PurgeDeletedChunks(
+	ctx context.Context, cutoff time.Time, batchSize int,
+) (int64, error) {
+	if batchSize <= 0 {
+		batchSize = 5000
+	}
+	var total int64
+	for {
+		res := r.db.WithContext(ctx).Exec(
+			`DELETE FROM chunks
+			 WHERE id IN (
+			   SELECT id FROM chunks
+			   WHERE deleted_at IS NOT NULL AND deleted_at < ?
+			   LIMIT ?
+			 )`, cutoff, batchSize)
+		if res.Error != nil {
+			return total, res.Error
+		}
+		total += res.RowsAffected
+		if res.RowsAffected < int64(batchSize) {
+			return total, nil
+		}
+	}
+}

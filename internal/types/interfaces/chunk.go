@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -108,6 +109,9 @@ type ChunkRepository interface {
 	DeleteChunks(ctx context.Context, tenantID uint64, ids []string) error
 	// DeleteChunksByKnowledgeID deletes chunks by knowledge id
 	DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error
+	// PurgeDeletedChunks hard-deletes tombstoned chunks older than cutoff.
+	PurgeDeletedChunks(ctx context.Context, cutoff time.Time, batchSize int) (int64, error)
+
 	// DeleteByKnowledgeList deletes all chunks for a knowledge list
 	DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error
 	// ListImageInfoByKnowledgeIDs returns non-empty (knowledge_id, image_info) pairs for image cleanup.
