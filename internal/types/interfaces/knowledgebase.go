@@ -223,6 +223,8 @@ type KnowledgeBaseRepository interface {
 	UpsertKBMember(ctx context.Context, member *types.KBMember) (*types.KBMember, error)
 	// DeleteKBMember soft-deletes a grant.
 	DeleteKBMember(ctx context.Context, kbID, userID string) error
+	// DeleteKBMembersByKB soft-deletes every grant for a removed KB.
+	DeleteKBMembersByKB(ctx context.Context, kbID string) error
 
 	// UpdateKnowledgeBase updates a knowledge base record
 	// Parameters:

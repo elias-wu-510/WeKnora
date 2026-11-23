@@ -927,6 +927,12 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	s.cleanupTasksForKnowledgeBase(kbCleanupCtx, id, nil, nil)
 	cancelKBCleanup()
 
+	// Step 1a: Drop explicit per-KB grants so deleted libraries leave no
+	// dangling membership rows behind.
+	if delErr := s.repo.DeleteKBMembersByKB(ctx, id); delErr != nil {
+		logger.Warnf(ctx, "Failed to delete KB members for knowledge base %s: %v", id, delErr)
+	}
+
 	// Step 1b: Remove all organization shares for this KB so org settings no longer show them
 	if s.shareRepo != nil {
 		if delErr := s.shareRepo.DeleteByKnowledgeBaseID(ctx, id); delErr != nil {

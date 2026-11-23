@@ -75,3 +75,11 @@ func (r *knowledgeBaseRepository) DeleteKBMember(ctx context.Context, kbID, user
 		Where("kb_id = ? AND user_id = ? AND deleted_at IS NULL", kbID, userID).
 		Updates(map[string]any{"deleted_at": &now, "updated_at": now}).Error
 }
+
+// DeleteKBMembersByKB soft-deletes every grant when the KB itself is removed.
+func (r *knowledgeBaseRepository) DeleteKBMembersByKB(ctx context.Context, kbID string) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).Model(&types.KBMember{}).
+		Where("kb_id = ? AND deleted_at IS NULL", kbID).
+		Updates(map[string]any{"deleted_at": &now, "updated_at": now}).Error
+}
