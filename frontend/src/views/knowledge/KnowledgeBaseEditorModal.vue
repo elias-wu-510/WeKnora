@@ -2,6 +2,7 @@
   <SettingsModalShell :visible="visible"
     :title="editorMode === 'create' ? $t('knowledgeEditor.titleCreate') : $t('knowledgeEditor.titleEdit')"
     v-model="currentSection" :nav-groups="navGroups" :loading="loading" :z-index="1000"
+    overlay-class="kb-editor-overlay"
     nav-guide="kb-editor-sidebar" nav-item-guide-prefix="kb-editor-nav" @close="modalShell.requestClose">
     <div class="content-wrapper">
       <!-- 基本信息 -->
@@ -37,6 +38,17 @@
                 <t-radio-button value="faq">{{ $t('knowledgeEditor.basic.typeFAQ') }}</t-radio-button>
               </t-radio-group>
               <p class="form-tip">{{ $t('knowledgeEditor.basic.typeDescription') }}</p>
+            </div>
+
+            <!-- 可见范围（仅新建时可选） -->
+            <div v-if="editorMode === 'create'" class="form-item" data-guide="kb-create-scope">
+              <label class="form-label required">可见范围</label>
+              <t-radio-group v-model="formData.scope" data-guide="kb-create-scope-options">
+                <t-radio-button v-if="canCreatePublicKb" value="public">公开</t-radio-button>
+                <t-radio-button value="project">项目</t-radio-button>
+                <t-radio-button value="personal">私密</t-radio-button>
+              </t-radio-group>
+              <p class="form-tip">{{ scopeHint }}</p>
             </div>
 
             <!-- 索引策略 (紧跟类型选择) -->
@@ -830,6 +842,22 @@ const advancedSettingsRef = ref<InstanceType<typeof KBAdvancedSettings>>()
 const formData = ref<any>(null)
 const isFAQ = computed(() => formData.value?.type === 'faq')
 
+// 只有空间 admin/owner 能创建公开库（后端同规则），其余角色只看到
+// 项目 / 私密，并默认项目。hasRole('admin') 已覆盖 owner。
+const canCreatePublicKb = computed(() => authStore.hasRole('admin'))
+const defaultKbScope = (): 'public' | 'project' | 'personal' =>
+  canCreatePublicKb.value ? 'public' : 'project'
+const scopeHint = computed(() => {
+  switch (formData.value?.scope) {
+    case 'personal':
+      return '仅自己可见，其他空间成员无法访问。'
+    case 'project':
+      return '仅被添加为成员的人可见；创建后可在知识库详情页的「成员」里管理授权。'
+    default:
+      return '全空间成员均可查看；只有空间管理员或所有者可以创建公开知识库。'
+  }
+})
+
 const kbCreateNeedsEmbedding = computed(() => {
   if (!formData.value || formData.value.type === 'faq') return false
   const s = formData.value.indexingStrategy
@@ -869,6 +897,7 @@ watch(
 const initFormData = (type: 'document' | 'faq' = 'document') => {
   return {
     type,
+    scope: defaultKbScope(),
     name: '',
     description: '',
     faqConfig: {
@@ -1024,6 +1053,7 @@ const loadKBData = async (
     const kbType = (kb.type as 'document' | 'faq') || 'document'
     formData.value = {
       type: kbType,
+      scope: ((kb as any).scope || 'public') as 'public' | 'project' | 'personal',
       name: kb.name || '',
       description: kb.description || '',
       faqConfig: {
@@ -1429,6 +1459,11 @@ const buildSubmitData = () => {
     },
     embedding_model_id: formData.value.modelConfig.embeddingModelId,
     summary_model_id: formData.value.modelConfig.llmModelId
+  }
+
+  // 可见范围只属于创建请求。更新接口不接受 scope，编辑时不要带上。
+  if (editorMode.value === 'create') {
+    data.scope = formData.value.scope || defaultKbScope()
   }
 
   // Vector-store binding. Only attach the field when the user actively
@@ -2316,6 +2351,94 @@ watch(() => chatResources.allModels, (list) => {
     display: flex;
     gap: 8px;
     align-items: center;
+  }
+}
+</style>
+
+<!-- 窄屏（手机）适配：设置壳是全站共用组件，只在本编辑器的 overlay 下覆盖，
+     不动其他弹窗的全局样式。侧栏改为顶部横向导航，避免 430px 下两栏挤压。 -->
+<style lang="less">
+@media (max-width: 640px) {
+  .settings-modal-shell.kb-editor-overlay {
+    padding: 0;
+  }
+
+  .kb-editor-overlay {
+    .settings-modal {
+      width: 100%;
+      max-width: 100%;
+      height: 100%;
+      max-height: 100%;
+      border-radius: 0;
+    }
+
+    .settings-container {
+      flex-direction: column;
+    }
+
+    .settings-sidebar {
+      width: 100%;
+      box-sizing: border-box;
+      height: auto;
+      max-height: 64px;
+      flex-direction: row;
+      align-items: center;
+      border-right: none;
+      border-bottom: 1px solid var(--td-component-stroke);
+      padding-right: 52px;
+      flex-shrink: 0;
+    }
+
+    .sidebar-header {
+      padding: 10px 8px 10px 16px;
+      flex-shrink: 0;
+    }
+
+    .sidebar-title {
+      font-size: 15px;
+      white-space: nowrap;
+    }
+
+    .settings-nav {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 2px;
+      flex: 1;
+      min-width: 0;
+      padding: 6px 0;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+
+    .nav-group-title {
+      display: none;
+    }
+
+    .nav-item {
+      flex: 0 0 auto;
+      margin: 0;
+      padding: 6px 10px;
+      gap: 4px;
+    }
+
+    .nav-label {
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .nav-icon {
+      font-size: 15px;
+    }
+
+    .settings-body {
+      padding: 16px;
+    }
+
+    .settings-footer {
+      padding: 10px 16px;
+      gap: 8px;
+    }
   }
 }
 </style>

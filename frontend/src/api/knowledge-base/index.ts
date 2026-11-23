@@ -236,6 +236,9 @@ export interface KnowledgeBaseStoreView {
 export function createKnowledgeBase(data: {
   name: string;
   description?: string;
+  // 可见范围：公开（全空间）/ 项目（仅授权成员）/ 私密（仅自己）。
+  // 省略时后端按 public 处理；contributor 创建 public 会得到 403。
+  scope?: 'public' | 'project' | 'personal';
   type?: 'document' | 'faq';
   chunking_config?: any;
   image_processing_config?: ImageProcessingConfig;
@@ -288,6 +291,60 @@ export function getKnowledgeBaseById(id: string, options?: { agent_id?: string; 
   if (options?.agent_source_tenant_id) query.set('agent_source_tenant_id', options.agent_source_tenant_id);
   const qs = query.toString();
   return get(qs ? `/api/v1/knowledge-bases/${id}?${qs}` : `/api/v1/knowledge-bases/${id}`);
+}
+
+// ---------------------------------------------------------------------------
+// 知识库成员（W3 项目库授权）
+// ---------------------------------------------------------------------------
+
+/** 库级角色，独立于空间角色：viewer 只读 / contributor 可写 / admin 可管理成员。 */
+export type KnowledgeBaseMemberRole = 'viewer' | 'contributor' | 'admin';
+
+export interface KnowledgeBaseMember {
+  id: string;
+  tenant_id?: number;
+  kb_id: string;
+  user_id: string;
+  role: KnowledgeBaseMemberRole;
+  created_at?: string;
+}
+
+export interface ListKnowledgeBaseMembersResponse {
+  success: boolean;
+  data: KnowledgeBaseMember[];
+  message?: string;
+}
+
+export interface KnowledgeBaseMemberMutationResponse {
+  success: boolean;
+  data?: KnowledgeBaseMember;
+  message?: string;
+}
+
+/** GET /knowledge-bases/:id/members — 需要对该库有读权限。 */
+export function listKnowledgeBaseMembers(kbId: string) {
+  return get(
+    `/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/members`,
+  ) as unknown as Promise<ListKnowledgeBaseMembersResponse>;
+}
+
+/** POST /knowledge-bases/:id/members — 同一 user_id 重复提交即更新角色。 */
+export function addKnowledgeBaseMember(
+  kbId: string,
+  userId: string,
+  role: KnowledgeBaseMemberRole,
+) {
+  return post(
+    `/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/members`,
+    { user_id: userId, role },
+  ) as unknown as Promise<KnowledgeBaseMemberMutationResponse>;
+}
+
+/** DELETE /knowledge-bases/:id/members/:user_id */
+export function removeKnowledgeBaseMember(kbId: string, userId: string) {
+  return del(
+    `/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/members/${encodeURIComponent(userId)}`,
+  ) as unknown as Promise<{ success: boolean; message?: string }>;
 }
 
 export function updateKnowledgeBase(id: string, data: {

@@ -226,6 +226,12 @@
                         <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
                       </div>
                     </t-tooltip>
+                    <t-tooltip :content="kbScopeTooltip(kb.scope)" placement="top">
+                      <div class="feature-badge scope-badge" :class="'scope-' + kbScopeKey(kb.scope)">
+                        <t-icon :name="kbScopeIcon(kb.scope)" size="14px" />
+                        <span class="badge-count">{{ kbScopeLabel(kb.scope) }}</span>
+                      </div>
+                    </t-tooltip>
                     <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
                       placement="top">
                       <div class="feature-badge kg">
@@ -455,6 +461,12 @@
                         <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count ||
                           0) }}</span>
                         <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
+                      </div>
+                    </t-tooltip>
+                    <t-tooltip :content="kbScopeTooltip(kb.scope)" placement="top">
+                      <div class="feature-badge scope-badge" :class="'scope-' + kbScopeKey(kb.scope)">
+                        <t-icon :name="kbScopeIcon(kb.scope)" size="14px" />
+                        <span class="badge-count">{{ kbScopeLabel(kb.scope) }}</span>
                       </div>
                     </t-tooltip>
                     <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
@@ -806,7 +818,30 @@ interface KB {
   creator_id?: string;
   // creator_name 由后端 list 接口回填，仅用于卡片右下角来源徽章的 tooltip。
   creator_name?: string;
+  // W3 可见范围：public / project / personal。老数据缺省按 public 处理。
+  scope?: 'public' | 'project' | 'personal';
+  owner_user_id?: string;
 }
+
+// 卡片上的范围徽标：只占一个 feature-badge 的位置，不改动布局。
+const kbScopeKey = (scope?: string): 'public' | 'project' | 'personal' =>
+  scope === 'project' || scope === 'personal' ? scope : 'public';
+const KB_SCOPE_LABELS: Record<'public' | 'project' | 'personal', string> = {
+  public: '公开',
+  project: '项目',
+  personal: '私密',
+};
+const KB_SCOPE_TIPS: Record<'public' | 'project' | 'personal', string> = {
+  public: '公开：全空间成员可见',
+  project: '项目：仅被授权的成员可见',
+  personal: '私密：仅自己可见',
+};
+const kbScopeLabel = (scope?: string) => KB_SCOPE_LABELS[kbScopeKey(scope)];
+const kbScopeTooltip = (scope?: string) => KB_SCOPE_TIPS[kbScopeKey(scope)];
+const kbScopeIcon = (scope?: string) => {
+  const key = kbScopeKey(scope);
+  return key === 'project' ? 'usergroup' : key === 'personal' ? 'lock-on' : 'browse';
+};
 
 const flatKnowledgeBaseSortAccessors: ResourceSortAccessors<any> = {
   getName: item => item?.name,
@@ -1766,6 +1801,34 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
 
 .feature-badge {
   .resource-feature-badge();
+
+  /* 可见范围徽标：复用 feature-badge 的尺寸，只额外容纳两个汉字。 */
+  &.scope-badge {
+    width: auto;
+    padding: 0 6px;
+    gap: 3px;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
+
+    &:hover {
+      background: var(--td-bg-color-container-hover);
+    }
+
+    .badge-count {
+      font-size: var(--app-text-xs);
+      font-weight: 500;
+    }
+
+    &.scope-project {
+      background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
+      color: var(--td-brand-color);
+    }
+
+    &.scope-personal {
+      background: color-mix(in srgb, var(--td-warning-color) 8%, transparent);
+      color: var(--td-warning-color);
+    }
+  }
 
   &.type-document {
     background: var(--td-bg-color-secondarycontainer);

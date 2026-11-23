@@ -42,6 +42,14 @@ import {
   downKnowledgeDetails,
   type KnowledgeFolderTree,
 } from "@/api/knowledge-base/index";
+import {
+  addKnowledgeBaseMember,
+  listKnowledgeBaseMembers,
+  removeKnowledgeBaseMember,
+  type KnowledgeBaseMember,
+  type KnowledgeBaseMemberRole,
+} from "@/api/knowledge-base/index";
+import { fetchAllTenantMembers, type TenantMember } from "@/api/tenant/members";
 import { isBatchDownloadableKnowledge } from './knowledgeDownloadFileName';
 import { waitForKnowledgeDeletion } from '@/utils/knowledgeDeletion';
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
@@ -89,6 +97,52 @@ const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
 const kbInfo = ref<any>(null);
+
+// --- 成员与权限（项目库授权） ---------------------------------------------
+// 库级成员与空间成员是两套角色：库角色只有 viewer/contributor/admin，
+// 展示姓名/邮箱时用空间成员列表做映射。
+const membersDialogVisible = ref(false);
+const kbMembers = ref<KnowledgeBaseMember[]>([]);
+const kbMembersLoading = ref(false);
+const tenantMembers = ref<TenantMember[]>([]);
+const tenantMembersLoading = ref(false);
+const memberSavingUserId = ref('');
+const addMemberUserId = ref('');
+const addMemberRole = ref<KnowledgeBaseMemberRole>('viewer');
+const addMemberSubmitting = ref(false);
+
+const KB_MEMBER_ROLE_LABELS: Record<KnowledgeBaseMemberRole, string> = {
+  viewer: '只读',
+  contributor: '可编辑',
+  admin: '管理员',
+};
+const memberRoleOptions = (Object.keys(KB_MEMBER_ROLE_LABELS) as KnowledgeBaseMemberRole[]).map(
+  (value) => ({ value, label: KB_MEMBER_ROLE_LABELS[value] }),
+);
+const tenantMemberMap = computed(
+  () => new Map(tenantMembers.value.map((member) => [member.user_id, member])),
+);
+const kbMemberDisplayName = (userId: string) => {
+  const member = tenantMemberMap.value.get(userId);
+  return member?.username || member?.email || userId;
+};
+const kbMemberDisplayEmail = (userId: string) => {
+  const member = tenantMemberMap.value.get(userId);
+  return member?.email || '';
+};
+// 已在库成员中的人不再出现在「添加成员」下拉里。
+const addMemberOptions = computed(() =>
+  tenantMembers.value
+    .filter((member) => !kbMembers.value.some((kbMember) => kbMember.user_id === member.user_id))
+    .map((member) => ({
+      value: member.user_id,
+      label: member.username ? `${member.username}（${member.email}）` : member.email,
+    })),
+);
+const kbScopeText = computed(() => {
+  const scope = kbInfo.value?.scope;
+  return scope === 'project' ? '项目' : scope === 'personal' ? '私密' : '公开';
+});
 const uploadSourceRef = ref<InstanceType<typeof KbUploadSourceDropdown> | null>(null);
 const kbLoading = ref(false);
 const docListLoading = ref(true);
@@ -1934,6 +1988,84 @@ const handleOpenKBSettings = () => {
   uiStore.openKBSettings(kbId.value);
 };
 
+// --- 成员与权限 -----------------------------------------------------------
+const loadKbMembers = async () => {
+  if (!kbId.value) return;
+  kbMembersLoading.value = true;
+  try {
+    const resp = await listKnowledgeBaseMembers(kbId.value);
+    kbMembers.value = resp?.data || [];
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || '加载成员失败');
+  } finally {
+    kbMembersLoading.value = false;
+  }
+};
+
+const loadTenantMembers = async () => {
+  const tenantId = authStore.effectiveTenantId;
+  if (!tenantId) return;
+  tenantMembersLoading.value = true;
+  try {
+    tenantMembers.value = await fetchAllTenantMembers(Number(tenantId));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || '加载空间成员失败');
+  } finally {
+    tenantMembersLoading.value = false;
+  }
+};
+
+const openMembersDialog = () => {
+  membersDialogVisible.value = true;
+  addMemberUserId.value = '';
+  addMemberRole.value = 'viewer';
+  void Promise.all([loadKbMembers(), loadTenantMembers()]);
+};
+
+const handleMemberRoleChange = async (member: KnowledgeBaseMember, role: any) => {
+  if (!kbId.value || !role || role === member.role) return;
+  memberSavingUserId.value = member.user_id;
+  try {
+    await addKnowledgeBaseMember(kbId.value, member.user_id, role as KnowledgeBaseMemberRole);
+    member.role = role as KnowledgeBaseMemberRole;
+    MessagePlugin.success('成员角色已更新');
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || '更新成员角色失败');
+    await loadKbMembers();
+  } finally {
+    memberSavingUserId.value = '';
+  }
+};
+
+const handleRemoveKbMember = async (member: KnowledgeBaseMember) => {
+  if (!kbId.value) return;
+  memberSavingUserId.value = member.user_id;
+  try {
+    await removeKnowledgeBaseMember(kbId.value, member.user_id);
+    kbMembers.value = kbMembers.value.filter((item) => item.user_id !== member.user_id);
+    MessagePlugin.success('已移除成员');
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || '移除成员失败');
+  } finally {
+    memberSavingUserId.value = '';
+  }
+};
+
+const handleAddKbMember = async () => {
+  if (!kbId.value || !addMemberUserId.value) return;
+  addMemberSubmitting.value = true;
+  try {
+    await addKnowledgeBaseMember(kbId.value, addMemberUserId.value, addMemberRole.value);
+    MessagePlugin.success('已添加成员');
+    addMemberUserId.value = '';
+    await loadKbMembers();
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || '添加成员失败');
+  } finally {
+    addMemberSubmitting.value = false;
+  }
+};
+
 const handleNavigateToKbList = () => {
   // C-Knowledge 的根级「知识库」面包屑回到自有首页，而不是引擎列表页。
   router.push(isCKnowledgeConsole() ? '/home' : '/platform/knowledge-bases');
@@ -2458,6 +2590,12 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
             <div class="kb-title-actions">
               <KBInfoPopover v-if="kbInfo && !authStore.isLiteMode" :kb-info="kbInfo"
                 :supported-file-types="[...supportedFileTypes]" />
+              <t-tooltip v-if="kbInfo" content="成员与权限" placement="top">
+                <button type="button" class="kb-settings-button kb-members-button" aria-label="成员与权限"
+                  @click="openMembersDialog">
+                  <t-icon name="usergroup" size="16px" />
+                </button>
+              </t-tooltip>
               <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
                 <button type="button" class="kb-settings-button" :aria-label="$t('knowledgeBase.settings')" :disabled="!kbId" @click="handleOpenKBSettings">
                   <t-icon name="setting" size="16px" />
@@ -2813,6 +2951,93 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
         支持 PDF、Word、Excel、PPT、Markdown、纯文本等格式，单个文件不超过 {{ MAX_FILE_SIZE_MB }}MB。
         选好后会先打开上传确认，可设置标签与解析方式。
       </p>
+    </div>
+  </t-dialog>
+
+  <!-- 成员与权限：库级授权（项目库默认需要在这里添加成员） -->
+  <t-dialog
+    v-model:visible="membersDialogVisible"
+    header="成员与权限"
+    :footer="false"
+    width="620px"
+    placement="center"
+    class="kb-members-dialog"
+    data-guide="kb-members-dialog"
+  >
+    <div class="kb-members">
+      <p class="kb-members-summary">
+        当前知识库：<strong>{{ kbInfo?.name || '—' }}</strong>
+        <span class="kb-members-scope">可见范围：{{ kbScopeText }}</span>
+      </p>
+
+      <div class="kb-members-section-title">已授权成员</div>
+      <t-loading :loading="kbMembersLoading" size="small">
+        <div v-if="!kbMembersLoading && kbMembers.length === 0" class="kb-members-empty">
+          暂无成员授权
+        </div>
+        <div v-else class="kb-members-list">
+          <div v-for="member in kbMembers" :key="member.user_id" class="kb-member-row">
+            <div class="kb-member-identity">
+              <span class="kb-member-name">{{ kbMemberDisplayName(member.user_id) }}</span>
+              <span v-if="kbMemberDisplayEmail(member.user_id)" class="kb-member-email">
+                {{ kbMemberDisplayEmail(member.user_id) }}
+              </span>
+            </div>
+            <t-select
+              class="kb-member-role"
+              :model-value="member.role"
+              :options="memberRoleOptions"
+              size="small"
+              :disabled="memberSavingUserId === member.user_id"
+              @change="(value: any) => handleMemberRoleChange(member, value)"
+            />
+            <t-popconfirm content="确定移除该成员？" @confirm="handleRemoveKbMember(member)">
+              <t-button
+                theme="danger"
+                variant="text"
+                size="small"
+                :disabled="memberSavingUserId === member.user_id"
+              >
+                移除
+              </t-button>
+            </t-popconfirm>
+          </div>
+        </div>
+      </t-loading>
+
+      <div class="kb-members-add">
+        <div class="kb-members-section-title">添加成员</div>
+        <div class="kb-members-add-row">
+          <t-select
+            v-model="addMemberUserId"
+            class="kb-members-add-user"
+            filterable
+            clearable
+            placeholder="从空间成员中选择"
+            :options="addMemberOptions"
+            :loading="tenantMembersLoading"
+            data-guide="kb-members-add-user"
+          />
+          <t-select
+            v-model="addMemberRole"
+            class="kb-members-add-role"
+            :options="memberRoleOptions"
+            data-guide="kb-members-add-role"
+          />
+          <t-button
+            theme="primary"
+            :loading="addMemberSubmitting"
+            :disabled="!addMemberUserId"
+            data-guide="kb-members-add-submit"
+            @click="handleAddKbMember"
+          >
+            添加
+          </t-button>
+        </div>
+        <p v-if="!tenantMembersLoading && addMemberOptions.length === 0" class="kb-members-add-empty">
+          空间成员都已获得授权。
+        </p>
+      </div>
     </div>
   </t-dialog>
 
@@ -3486,6 +3711,132 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   :deep(.t-icon) {
     font-size: var(--app-text-2xl);
   }
+}
+
+// 成员与权限弹窗
+.kb-members-dialog {
+  // TDesign 默认固定 620px，窄屏时不要撑出视口。
+  max-width: calc(100vw - 32px);
+}
+
+.kb-members {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 4px;
+  color: var(--td-text-color-primary);
+}
+
+.kb-members-summary {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--app-text-base);
+  color: var(--td-text-color-secondary);
+
+  strong {
+    color: var(--td-text-color-primary);
+    font-weight: 600;
+  }
+}
+
+.kb-members-scope {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--td-bg-color-secondarycontainer);
+  font-size: var(--app-text-xs);
+}
+
+.kb-members-section-title {
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  color: var(--td-text-color-secondary);
+}
+
+.kb-members-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.kb-member-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 108px 56px;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.kb-member-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.kb-member-name {
+  font-size: var(--app-text-base);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-member-email {
+  font-size: var(--app-text-xs);
+  color: var(--td-text-color-placeholder);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-members-empty {
+  padding: 28px 12px;
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: 8px;
+  text-align: center;
+  font-size: var(--app-text-base);
+  color: var(--td-text-color-placeholder);
+}
+
+.kb-members-add {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--td-component-stroke);
+}
+
+.kb-members-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kb-members-add-user {
+  flex: 1;
+  min-width: 0;
+}
+
+.kb-members-add-role {
+  width: 108px;
+  flex-shrink: 0;
+}
+
+.kb-members-add-empty {
+  margin: 0;
+  font-size: var(--app-text-xs);
+  color: var(--td-text-color-placeholder);
 }
 
 .faq-manager-wrapper {
