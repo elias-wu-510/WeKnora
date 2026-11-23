@@ -78,7 +78,7 @@
           <t-icon name="user" class="menu-icon" />
           <span>{{ $t('general.personalSettings') }}</span>
         </div>
-        <div v-if="!authStore.isLiteMode" class="menu-item" @click="handleQuickNav('tenant')">
+        <div v-if="!authStore.isLiteMode && !ckNonAdmin" class="menu-item" @click="handleQuickNav('tenant')">
           <t-icon name="user-circle" class="menu-icon" />
           <span>{{ $t('settings.workspaceSettings') }}</span>
         </div>
@@ -93,7 +93,7 @@
           <span>{{ $t('settings.modelManagement') }}</span>
         </div>
         <div class="menu-divider"></div>
-        <div class="menu-item" @click="handleSettings">
+        <div v-if="!ckNonAdmin" class="menu-item" @click="handleSettings">
           <t-icon name="setting" class="menu-icon" />
           <span>{{ $t('general.allSettings') }}</span>
         </div>
@@ -262,6 +262,10 @@ const showTenantIdentityLine = computed(() => {
 const canManageMembers = computed(() =>
   authStore.canAccessAllTenants || authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.members),
 )
+
+// C-Knowledge 普通成员（viewer / contributor）在用户菜单里只保留个人设置与
+// 帮助入口；空间设置、成员管理、模型管理、全部设置都属于管理台能力（D2）。
+const ckNonAdmin = computed(() => isCkConsole && !authStore.hasRole('admin'))
 const canManageModels = computed(() =>
   authStore.canAccessAllTenants ||
   authStore.isSystemAdmin ||

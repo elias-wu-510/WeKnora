@@ -82,6 +82,13 @@ export const useMenuStore = defineStore('menuStore', () => {
       if (ckConsole && item.path === 'organizations') {
         return false
       }
+      // D2：C-Knowledge 控制台只把「知识库」面开放给普通成员（viewer /
+      // contributor）。产物、智能体、工具箱、设置属于空间管理能力，只有
+      // admin / owner 才在侧栏看到；直接访问 URL 由路由守卫兜回 /home。
+      if (ckConsole && !authStore.hasRole('admin') &&
+        ['artifacts', 'agents', 'toolbox', 'settings'].includes(item.path)) {
+        return false
+      }
       if (authStore.isLiteMode && liteHiddenPaths.has(item.path)) {
         return false
       }

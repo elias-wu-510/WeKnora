@@ -419,6 +419,16 @@ router.beforeEach(async (to, from, next) => {
     return
   }
 
+  // D2：C-Knowledge 下普通成员只保留知识库面（首页 / 库列表 / 库详情 / 对话），
+  // 管理类页面直接按 URL 访问也会被兜回首页，而不是渲染后再报 403。
+  if (isCKnowledgeConsole() && to.path.startsWith('/platform/')) {
+    const adminOnly = /^\/platform\/(artifacts|agents|toolbox|settings|organizations)(\/|$)/.test(to.path)
+    if (adminOnly && !authStore.hasRole('admin')) {
+      next(CK_HOME_PATH)
+      return
+    }
+  }
+
   // SystemAdmin gate — checked AFTER auth so a non-admin who's logged
   // out gets redirected to /login first (consistent with how the rest
   // of the auth flow works), and only an authenticated non-admin sees
