@@ -9,7 +9,8 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
 import { normalizeSettingsSection } from '@/config/settingsRoute'
 import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
-import { CK_HOME_PATH, isCKnowledgeConsole, resolveConsoleBootSelection } from '@/utils/ckConsole'
+import { CK_HOME_PATH, isCKnowledgeConsole } from '@/utils/ckConsole'
+import { isAdminOnlyPath } from '@/config/deployment'
 
 /** 控制台登录后的默认落点：C-Knowledge 用自有首页，引擎站点保持知识库列表。 */
 const consoleLandingPath = () => (isCKnowledgeConsole() ? CK_HOME_PATH : '/platform/knowledge-bases')
@@ -291,17 +292,10 @@ async function hydrateSessionFromToken(authStore: ReturnType<typeof useAuthStore
   // /auth/me 的落库逻辑只在 auth store 里维护一份（user / tenant / memberships /
   // capabilities），这里只负责先把 token 放进 store。请求本身与启动、侧栏共用去重。
   const hydrated = await authStore.refreshFromAuthMe()
-  if (hydrated && isCKnowledgeConsole()) {
-    // C-Knowledge 独立入口：硬刷新（token 还在、store 为空）时成员关系刚
-    // 到手，此时补一次空间选择；规则同登录流程，无 ?tenant=/无历史偏好
-    // 默认进共享空间。非 CK 构建不受影响。
-    const selection = resolveConsoleBootSelection({
-      activeTenantId: authStore.tenant?.id ?? null,
-      activeTenantName: authStore.tenant?.name ?? null,
-      homeTenantId: authStore.user?.tenant_id ?? null,
-      memberships: authStore.memberships,
-    })
-    authStore.setSelectedTenant(selection.id, selection.name)
+  if (hydrated) {
+    // 硬刷新（token 还在、store 为空）时成员关系刚到手，补一次空间选择；
+    // 与启动/登录/OIDC 共用 tenantPreference 的同一套优先级。
+    await authStore.applyTenantPreference()
   }
   return hydrated
 }
@@ -422,8 +416,7 @@ router.beforeEach(async (to, from, next) => {
   // D2：C-Knowledge 下普通成员只保留知识库面（首页 / 库列表 / 库详情 / 对话），
   // 管理类页面直接按 URL 访问也会被兜回首页，而不是渲染后再报 403。
   if (isCKnowledgeConsole() && to.path.startsWith('/platform/')) {
-    const adminOnly = /^\/platform\/(artifacts|agents|toolbox|settings|organizations)(\/|$)/.test(to.path)
-    if (adminOnly && !authStore.hasRole('admin')) {
+    if (isAdminOnlyPath(to.path) && !authStore.hasRole('admin')) {
       next(CK_HOME_PATH)
       return
     }

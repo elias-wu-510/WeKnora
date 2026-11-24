@@ -12,6 +12,7 @@ import { useChatResourcesStore } from '@/stores/chatResources'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useOrganizationStore } from '@/stores/organization'
 import { createSequencedRefresh } from '@/stores/sequencedRefresh'
+import { applyTenantPreference as applyTenantPreferenceFromSources } from '@/utils/tenantPreference'
 
 /** 登出时丢弃 Pinia 内的空间级资源缓存，避免 SPA 重登复用上一账号数据。 */
 function clearSessionResourceCaches() {
@@ -39,6 +40,9 @@ export const useAuthStore = defineStore('auth', () => {
   const currentKnowledgeBase = ref<KnowledgeBaseInfo | null>(null)
   const selectedTenantId = ref<number | null>(null)
   const selectedTenantName = ref<string | null>(null)
+  // /auth/me 解析出的服务端建议空间（last_active → shared → home）。
+  // 只作输入缓存，不直接展示；选中结果仍写入 selectedTenantId。
+  const serverPreferredTenantId = ref<number | null>(null)
   const allTenants = ref<TenantInfoFromAPI[]>([])
   // memberships lists every tenant the user can authenticate into,
   // along with their role in each. Populated from /auth/login response.
@@ -267,6 +271,11 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  const setServerPreferredTenantId = (tenantId: number | null | undefined) => {
+    const id = Number(tenantId)
+    serverPreferredTenantId.value = Number.isSafeInteger(id) && id > 0 ? id : null
+  }
+
   const setSelectedTenant = (tenantId: number | null, tenantName: string | null = null) => {
     const previousTenantId = selectedTenantId.value
     const tenantChanged = previousTenantId !== tenantId
@@ -402,6 +411,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     setAutoAcceptInvitation(response.data?.capabilities?.auto_accept_invitation === true)
+    setServerPreferredTenantId(response.data?.preferred_tenant_id)
 
     authMeSynced = true
     return true
@@ -452,6 +462,7 @@ export const useAuthStore = defineStore('auth', () => {
     currentKnowledgeBase.value = null
     selectedTenantId.value = null
     selectedTenantName.value = null
+    serverPreferredTenantId.value = null
     allTenants.value = []
     memberships.value = []
     pendingInvitationCount.value = 0
@@ -566,6 +577,22 @@ export const useAuthStore = defineStore('auth', () => {
     isLiteMode.value = localStorage.getItem('weknora_lite_mode') === 'true'
   }
 
+  /**
+   * 唯一的空间选择入口：把 store 里已知的服务端建议、活跃空间、home 与
+   * 成员关系交给 tenantPreference，并写回选中空间。启动、路由水合、
+   * OIDC 回调与登录四个入口都调用这里。
+   */
+  const applyTenantPreference = async (): Promise<void> => {
+    await applyTenantPreferenceFromSources({
+      preferredId: serverPreferredTenantId.value,
+      activeTenantId: tenant.value?.id ?? null,
+      activeTenantName: tenant.value?.name ?? null,
+      homeTenantId: user.value?.tenant_id ?? null,
+      memberships: memberships.value,
+      setSelectedTenant,
+    })
+  }
+
   // 初始化时从localStorage恢复状态
   initFromStorage()
 
@@ -579,6 +606,7 @@ export const useAuthStore = defineStore('auth', () => {
     currentKnowledgeBase,
     selectedTenantId,
     selectedTenantName,
+    serverPreferredTenantId,
     allTenants,
     memberships,
     pendingInvitationCount,
@@ -606,6 +634,8 @@ export const useAuthStore = defineStore('auth', () => {
     setKnowledgeBases,
     setCurrentKnowledgeBase,
     setSelectedTenant,
+    setServerPreferredTenantId,
+    applyTenantPreference,
     setAllTenants,
     setMemberships,
     setPendingInvitationCount,

@@ -20,11 +20,9 @@ import { installTDesignIconOfflineGuard } from "@/utils/tdesign-icon-offline";
 import { installAutofillGuard } from "@/utils/disable-autofill";
 import { useAuthStore } from "@/stores/auth";
 import {
-  isCKnowledgeConsole,
   preferredTenant,
   rememberPreferredTenant,
-  resolveConsoleBootSelection,
-} from "@/utils/ckConsole";
+} from "@/utils/tenantPreference";
 
 // 必须在 Vue 组件挂载之前执行，避免 tdesign-icons 运行时请求 tdesign.gtimg.com
 installTDesignIconOfflineGuard();
@@ -84,17 +82,12 @@ async function bootstrap() {
     } catch {
       // best-effort; capabilities stay at defaults until the next refresh
     }
-    // C-Knowledge 独立入口：成员关系到手后补一次空间选择。没有 ?tenant=
-    // 也没有历史偏好时默认落到共享空间，让首个知识库请求就带对
-    // X-Tenant-ID（否则会落在个人空间、首页显示「全部 0」）。
-    if (restored && isCKnowledgeConsole()) {
-      const selection = resolveConsoleBootSelection({
-        activeTenantId: authStore.tenant?.id ?? null,
-        activeTenantName: authStore.tenant?.name ?? null,
-        homeTenantId: authStore.user?.tenant_id ?? null,
-        memberships: authStore.memberships,
-      });
-      authStore.setSelectedTenant(selection.id, selection.name);
+    // 空间选择只走 tenantPreference 一个入口（服务端 preferred → 本机
+    // 显式选择 → 旧选择 → 配置共享空间 → home）。没有 ?tenant=、也没有
+    // 历史偏好时由 /auth/config 的 shared_tenant_id 兜底，不再硬编码
+    // 10000；让首个知识库请求就带对 X-Tenant-ID（否则首页「全部 0」）。
+    if (restored) {
+      await authStore.applyTenantPreference();
     }
   }
 
