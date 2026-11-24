@@ -44,6 +44,7 @@ const props = defineProps<{
   selectedIds: Set<string>;
   canEdit: boolean;
   canDownload: boolean;
+  canDeleteKnowledge: boolean;
   canMutateKnowledge: boolean;
   traceVisibleIds: Record<string, boolean>;
   loading?: boolean;
@@ -333,6 +334,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
                 <DocumentActionMenu
                   :item="item"
                   :can-download="canDownload"
+                  :can-delete-knowledge="canDeleteKnowledge"
                   :can-mutate-knowledge="canMutateKnowledge"
                   :trace-visible="!!traceVisibleIds[item.id] || (item.parse_status === 'pending' || item.parse_status === 'processing' || item.parse_status === 'finalizing')"
                   @download="handleAction('download', item)"

@@ -362,8 +362,20 @@ const isViaShare = computed(() => !!currentSharedKb.value);
 // Declared first: the canEdit / canManage gates below treat an explicit
 // cross-tenant grant as the single source of truth.
 const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
+// 服务端 GET /knowledge-bases/:id 计算的能力契约。capabilities 同时承载
+// 存储/功能开关（vector/keyword/...），这里只读取授权布尔键；键不存在时
+// 回退到旧的前端推导，兼容尚未升级的后端。
+const kbCapabilities = computed<Record<string, unknown>>(() => kbInfo.value?.capabilities ?? {});
+const capabilityBool = (name: string): boolean | undefined => {
+  const value = kbCapabilities.value?.[name];
+  return typeof value === 'boolean' ? value : undefined;
+};
 // 服务端 requireKBAdmin 的镜像：只有库管理员能改成员；只读成员只看到名单。
-const canManageKbMembers = computed(() => kbInfo.value?.can_manage_members === true);
+const canManageKbMembers = computed(() => {
+  const fromCapabilities = capabilityBool('manage_members');
+  if (fromCapabilities !== undefined) return fromCapabilities;
+  return kbInfo.value?.can_manage_members === true;
+});
 
 // Can edit: when accessed via an organization share, ONLY the share grant
 // counts — even if the current user happens to be the original creator of
@@ -381,6 +393,8 @@ const canManageKbMembers = computed(() => kbInfo.value?.can_manage_members === t
 // hasRole('contributor') is intentionally NOT here — being a Contributor
 // in a tenant does not by itself grant edit on someone else's KB.
 const canEdit = computed(() => {
+  const fromCapabilities = capabilityBool('edit');
+  if (fromCapabilities !== undefined) return fromCapabilities;
   const permission = effectiveKBPermission.value;
   if (permission) return permissionCanEditKB(permission);
   if (isViaShare.value) return orgStore.canEditKB(kbId.value, false);
@@ -390,9 +404,11 @@ const canEdit = computed(() => {
 });
 
 // 上传（新增文档）比编辑/删除更宽：同空间 contributor 也可以投稿，
-// 与后端 /knowledge-bases/:id/knowledge/file 的 Contributor 闸门对齐。
+// 与后端 /knowledge-bases/:id/knowledge/file 的有效库角色闸门对齐。
 // 跨空间分享仍只认显式 grant，避免借 tenant 角色越权写别人的库。
 const canUpload = computed(() => {
+  const fromCapabilities = capabilityBool('upload');
+  if (fromCapabilities !== undefined) return fromCapabilities;
   if (canEdit.value) return true;
   if (isViaShare.value || isFAQ.value) return false;
   return authStore.hasRole('contributor');
@@ -402,6 +418,8 @@ const canUpload = computed(() => {
 // shared KBs only an 'admin' share grant qualifies — editor/viewer (and
 // even being the creator viewed via share) never grant delete/settings.
 const canManage = computed(() => {
+  const fromCapabilities = capabilityBool('delete');
+  if (fromCapabilities !== undefined) return fromCapabilities;
   const permission = effectiveKBPermission.value;
   if (permission) return permissionCanManageKB(permission);
   if (isViaShare.value) return orgStore.canManageKB(kbId.value, false);
@@ -413,14 +431,20 @@ const canManage = computed(() => {
 // The activity feed exposes owner-side actor and configuration summaries.
 // It lives in KB settings (KnowledgeBaseEditorModal) for Owner/Admin in the home tenant.
 
-// Can mutate knowledge (move / batch-delete): the backend gate for these
-// two endpoints is g.Contributor(), so the caller MUST be Contributor+
-// in their tenant on top of having KB edit permission. Without the extra
-// role check, an org-share-editor whose tenant role is Viewer would see
-// the "Move" / "Batch manage" entries and 403 on click. For shared KBs
-// the local tenant role is irrelevant — canEdit already encodes the share
-// grant, so trust it.
+// 单文档删除在后端走 OwnedKnowledgeKBOrAdmin（库管理员/创建者/空间管理员），
+// 因此单独消费 capabilities.delete；旧后端没有该键时退回 canEdit。
+const canDeleteKnowledge = computed(() => {
+  const fromCapabilities = capabilityBool('delete');
+  if (fromCapabilities !== undefined) return fromCapabilities;
+  return canEdit.value;
+});
+
+// 移动/批量管理入口：capabilities.edit 为真时，库贡献者也可以移动、重解析和
+// 改标签；批量删除仍由后端按库管理员校验，前端保持入口可见但可能得到 403
+// （与历史行为一致）。
 const canMutateKnowledge = computed(() => {
+  const fromCapabilities = capabilityBool('edit');
+  if (fromCapabilities !== undefined) return fromCapabilities;
   if (!canEdit.value) return false;
   if (isViaShare.value) return true;
   if (isOwner.value) return true;
@@ -433,6 +457,10 @@ const canMutateKnowledge = computed(() => {
 // Viewer can never download; for cross-tenant KBs the effective share
 // permission must additionally be Editor or Admin.
 const canDownloadKnowledge = computed(() => {
+  // 下载走 KBAccessWrite（有效库角色 contributor 及以上），与 upload 同一档；
+  // 不能复用 edit，因为空间 contributor 可下载但不能改他人库里的既有文档。
+  const fromCapabilities = capabilityBool('upload');
+  if (fromCapabilities !== undefined) return fromCapabilities;
   if (!authStore.hasRole('contributor')) return false;
   const permission = effectiveKBPermission.value;
   return !permission || permission === 'owner' || permission === 'admin' || permission === 'editor';
@@ -2828,6 +2856,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     :batch-mode="batchMode"
                     :can-edit="canEdit"
                     :can-download="canDownloadKnowledge"
+                    :can-delete-knowledge="canDeleteKnowledge"
                     :can-mutate-knowledge="canMutateKnowledge"
                     :trace-available-by-id="traceAvailableById"
                     :move-menu-mode="moveMenuMode"
@@ -2853,7 +2882,8 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                 <template v-else-if="cardList.length && viewMode === 'list'">
                   <DocumentListView :kb-id="kbId" :items="cardList" :folder-options="folderOptions"
                     :selected-ids="selectedIds"
-                    :can-edit="canEdit" :can-download="canDownloadKnowledge" :can-mutate-knowledge="canMutateKnowledge"
+                    :can-edit="canEdit" :can-download="canDownloadKnowledge"
+                    :can-delete-knowledge="canDeleteKnowledge" :can-mutate-knowledge="canMutateKnowledge"
                     :trace-visible-ids="traceAvailableById"
                     :move-menu-mode="moveMenuMode"
                     :move-target-kbs="moveTargetKbs"
