@@ -350,7 +350,7 @@ import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
 import { canRegister } from './registrationPolicy'
 import { newPasswordRules } from '@/utils/passwordPolicy'
-import { afterLoginPath, isCKnowledgeConsole, resolveTenantSelection } from '@/utils/ckConsole'
+import { afterLoginPath, isCKnowledgeConsole } from '@/utils/ckConsole'
 import { getApiBaseUrl } from '@/utils/api-base'
 import ckLogo from '@/assets/img/ck-logo.svg'
 import { Swiper, SwiperSlide } from 'swiper/vue'
@@ -596,20 +596,11 @@ const persistLoginResponse = async (response: any, skipRedirect = false) => {
     if (Array.isArray(response.memberships)) {
       authStore.setMemberships(response.memberships)
     }
-    // If the backend dropped us into a non-home tenant (honoured a
-    // remembered "last active tenant" preference), set the override so
-    // subsequent requests carry X-Tenant-ID and the UI stays consistent.
-    // Otherwise clear any stale override left in localStorage by a
-    // previous session for a different account.
-    const activeIdNum = Number(activeTenant?.id)
-    const homeIdNum = Number(homeTenantIdRaw)
-    const selection = resolveTenantSelection({
-      activeTenantId: Number.isFinite(activeIdNum) ? activeIdNum : null,
-      activeTenantName: activeTenant?.name || null,
-      homeTenantId: Number.isFinite(homeIdNum) ? homeIdNum : null,
-      memberships: response.memberships,
-    })
-    authStore.setSelectedTenant(selection.id, selection.name)
+    // 登录响应没有 preferred_tenant_id（服务端已把活跃空间解析好），
+    // 清掉上个会话残留再交给唯一入口；本机显式选择、配置共享空间等
+    // 优先级都在 tenantPreference 里维护。
+    authStore.setServerPreferredTenantId(null)
+    await authStore.applyTenantPreference()
   }
 
   // Pull runtime capabilities (including whether ordinary users may create

@@ -2,7 +2,20 @@
 <html lang="en">
 <head>
     <title>WeKnora</title>
-    <script>if ((() => { const h = location.hostname; return h === 'c-knowledge.c-smart.hk' || h === 'c-knowledge-test.c-smart.hk' || location.pathname.indexOf('/c-knowledge/') === 0 || location.pathname.indexOf('/c-knowledge-test/') === 0 })()) document.title = 'C-Knowledge';</script>
+    <script>
+      /* 部署形态由 vite 注入（见 vite.config.ts 的 ckDeployHtml）；host 列表
+         不再手抄。pathname 前缀兜底保留，避免 dev/静态直开时判定失效。 */
+      (function () {
+        var deploy = window.__CK_DEPLOY__ || {};
+        var base = String(deploy.base || '').replace(/\/+$/, '');
+        var hosts = deploy.hosts || [];
+        window.__CK_IS_CONSOLE__ = hosts.indexOf(location.hostname) !== -1 ||
+          base === '/c-knowledge' || base === '/c-knowledge-test' ||
+          location.pathname.indexOf('/c-knowledge/') === 0 ||
+          location.pathname.indexOf('/c-knowledge-test/') === 0;
+        if (window.__CK_IS_CONSOLE__) document.title = 'C-Knowledge';
+      })();
+    </script>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, minimal-ui">
     <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
@@ -17,7 +30,7 @@
     <script>
       /* C-Knowledge 白标：同一份构建产物，按部署前缀换掉图标与页面元信息（官网页不带前缀，不受影响）。 */
       (function () {
-        if (!(() => { const h = location.hostname; return h === 'c-knowledge.c-smart.hk' || h === 'c-knowledge-test.c-smart.hk' || location.pathname.indexOf('/c-knowledge/') === 0 || location.pathname.indexOf('/c-knowledge-test/') === 0 })()) return;
+        if (!window.__CK_IS_CONSOLE__) return;
         var head = document.head;
         var oldIcon = head.querySelector('link[rel="shortcut icon"]');
         if (oldIcon) oldIcon.parentNode.removeChild(oldIcon);

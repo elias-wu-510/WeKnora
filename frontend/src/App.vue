@@ -7,7 +7,7 @@ import ProtectedResourcePreview from '@/components/ProtectedResourcePreview.vue'
 import ManualKnowledgeEditor from '@/components/manual-knowledge-editor.vue'
 import UploadConfirmHost from '@/components/UploadConfirmHost.vue'
 import { useAuthStore } from '@/stores/auth'
-import { afterLoginPath, isCKnowledgeConsole, resolveTenantSelection } from '@/utils/ckConsole'
+import { afterLoginPath, isCKnowledgeConsole } from '@/utils/ckConsole'
 import { useSettingsStore } from '@/stores/settings'
 import { getCurrentUser, userInfoFromApi } from '@/api/auth'
 import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
@@ -84,19 +84,10 @@ const syncOIDCUserContext = async () => {
   if (typeof capabilities?.can_create_tenant === 'boolean') {
     authStore.setCanCreateTenant(capabilities.can_create_tenant)
   }
-  // Same active-vs-home reconciliation as Login.vue: if the OIDC login
-  // landed us in a non-home tenant (because the backend honoured a
-  // remembered last-active-tenant preference) make sure X-Tenant-ID
-  // override is set; otherwise drop any stale override.
-  const activeIdNum = tenant?.id != null ? Number(tenant.id) : NaN
-  const homeIdNum = user.tenant_id != null ? Number(user.tenant_id) : NaN
-  const selection = resolveTenantSelection({
-    activeTenantId: Number.isFinite(activeIdNum) ? activeIdNum : null,
-    activeTenantName: tenant?.name || null,
-    homeTenantId: Number.isFinite(homeIdNum) ? homeIdNum : null,
-    memberships,
-  })
-  authStore.setSelectedTenant(selection.id, selection.name)
+  // OIDC 回调与启动/登录共用同一个空间选择入口：服务端 preferred →
+  // 本机显式选择 → 旧选择 → 配置共享空间 → home。
+  authStore.setServerPreferredTenantId(currentUserResponse.data.preferred_tenant_id)
+  await authStore.applyTenantPreference()
 }
 
 const persistOIDCLoginResponse = async (response: any) => {

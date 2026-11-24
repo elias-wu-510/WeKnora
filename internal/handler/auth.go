@@ -671,6 +671,11 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	// 同步返回当前用户的 memberships，让前端在页面刷新（仅命中 /auth/me）
 	// 后也能恢复 currentTenantRole，避免角色信息只在 login 那一刻可用。
 	memberships := h.userService.BuildLoginMemberships(ctx, user, tenant)
+	// Single server-side decision consumed by the SPA's tenant selector:
+	// last_active (still a member) -> shared workspace (still a member) -> home.
+	// Keeping the order here means the four frontend entry points no longer
+	// each re-derive it from different fields.
+	preferredTenantID := resolvePreferredTenantID(user, memberships, h.sharedTenantID())
 	canCreateTenant := user.CanAccessAllTenants ||
 		resolveTenantSelfServiceCreationEnabled(ctx, h.configInfo, h.systemSettingSvc)
 	autoAcceptInvitation := h.systemSettingSvc != nil &&
@@ -682,6 +687,7 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 			"preference_defaults": gin.H{"browser_search_instructions": types.DefaultBrowserSearchInstructions},
 			"tenant":              dto.NewTenantResponse(ctx, tenant),
 			"memberships":         memberships,
+			"preferred_tenant_id": preferredTenantID,
 			"tenant_required":     tenant == nil,
 			"capabilities": gin.H{
 				"can_create_tenant":      canCreateTenant,
@@ -856,6 +862,10 @@ func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 		"registration_mode":        mode,
 		"complex_password_enabled": complexPasswordEnabled,
 		"feishu_enabled":           h.feishuEnabled(),
+		// Shared workspace the deployment wants new/no-membership users to
+		// land in. 0 means "not configured"; the frontend must not guess an
+		// ID in that case (it used to hardcode 10000, which 403s non-members).
+		"shared_tenant_id": h.sharedTenantID(),
 	})
 }
 

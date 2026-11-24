@@ -274,6 +274,9 @@ export interface AuthConfigResponse {
   // 飞书（中海通）登录是否已在后端配置。仅 C-Knowledge 控制台消费；
   // 老版本后端不返回该字段时为 undefined，按 false 处理。
   feishu_enabled?: boolean
+  // 部署配置的共享空间 id（后端 FeishuAuth.SharedTenantID）；0/缺省表示
+  // 未配置，前端不得自行猜测（旧版本硬编码 10000，非成员会 403）。
+  shared_tenant_id?: number
 }
 
 export async function getAuthConfig(): Promise<AuthConfigResponse> {
@@ -354,10 +357,10 @@ export interface AuthCapabilities {
   auto_accept_invitation: boolean
 }
 
-export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[]; tenant_required?: boolean; capabilities?: AuthCapabilities; preference_defaults?: { browser_search_instructions: string } }; message?: string }> {
+export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[]; preferred_tenant_id?: number; tenant_required?: boolean; capabilities?: AuthCapabilities; preference_defaults?: { browser_search_instructions: string } }; message?: string }> {
   try {
     const response = await get('/api/v1/auth/me')
-    return response as unknown as { success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[]; tenant_required?: boolean; capabilities?: AuthCapabilities; preference_defaults?: { browser_search_instructions: string } }; message?: string }
+    return response as unknown as { success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[]; preferred_tenant_id?: number; tenant_required?: boolean; capabilities?: AuthCapabilities; preference_defaults?: { browser_search_instructions: string } }; message?: string }
   } catch (error: any) {
     return {
       success: false,
