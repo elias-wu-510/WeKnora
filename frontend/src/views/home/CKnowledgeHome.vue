@@ -12,7 +12,12 @@
           刷新
         </t-button>
         <t-button variant="outline" @click="goManage">知识库管理</t-button>
-        <t-button theme="primary" :disabled="loading || !uploadableBases.length" @click="openUploadPicker">
+        <t-button
+          v-if="canUpload"
+          theme="primary"
+          :disabled="loading || !uploadableBases.length"
+          @click="openUploadPicker"
+        >
           <template #icon><t-icon name="upload" /></template>
           上传资料
         </t-button>
@@ -78,7 +83,7 @@
             <div class="ck-card__top-actions">
               <span v-if="kb.type === 'faq'" class="ck-card__badge">问答</span>
               <button
-                v-else
+                v-else-if="canUpload"
                 type="button"
                 class="ck-card__upload"
                 :aria-label="`上传资料到${kb.name}`"
@@ -226,6 +231,9 @@ onMounted(load)
 // 独立入口登录是在 SPA 启动后才拿到 token 的：首屏那次列表请求可能还没带上 X-Tenant-ID
 // （落到个人空间 → 0 个库）。等共享空间被选定时补拉一次，避免「标题写着共享空间、列表却是空的」。
 const authStore = useAuthStore()
+// 只读成员不该看到上传入口：留一个点了才报错的按钮等于误导。
+// hasRole 是「至少」语义，contributor 及以上才放行。
+const canUpload = computed(() => authStore.hasRole('contributor'))
 watch(
   () => authStore.selectedTenantId,
   (id, previous) => {
