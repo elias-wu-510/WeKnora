@@ -22,7 +22,11 @@ var (
 // KBRequest keeps the authenticated caller separate from the resource tenant.
 // AgentSourceTenantID is parsed only when the explicit-agent fallback is used.
 type KBRequest struct {
-	Caller              types.Caller
+	Caller types.Caller
+	// KBMemberRole is the explicit kb_members grant for Caller, if any. It is
+	// loaded by the adapter only after the KB is known, and can raise (never
+	// lower) the effective role derived from the workspace role.
+	KBMemberRole        types.KBMemberRole
 	AgentID             string
 	AgentSourceTenantID string
 }
@@ -115,8 +119,21 @@ func ResolveKB(ctx context.Context, request KBRequest, kb *types.KnowledgeBase, 
 		}, nil
 	}
 	if kb.TenantID == request.Caller.TenantID {
-		return grant(types.OrgRoleAdmin)
+		effective := ResolveEffectiveKBRole(KBRoleSources{
+			TenantRole:         request.Caller.Role,
+			KBMemberRole:       request.KBMemberRole,
+			IsKBOwner:          isKBOwner(kb, request.Caller.UserID),
+			IsServicePrincipal: isServicePrincipal(ctx, request.Caller),
+		})
+		permission := effective.OrgMemberRole()
+		if !permission.HasPermission(required) {
+			return nil, ErrForbidden
+		}
+		return grant(permission)
 	}
+	// Cross-tenant access continues to be governed solely by the org share
+	// (capped by the caller's workspace role inside CheckTenantKBPermission).
+	// kb_members is a same-tenant grant; it must not widen the org boundary.
 	if shares != nil {
 		permissions := NewKBSharePermissions(ctx, shares, request.Caller.TenantID, request.Caller.Role)
 		permission, shared, err := permissions.Permission(kb.ID)
@@ -153,4 +170,26 @@ func ResolveKB(ctx context.Context, request KBRequest, kb *types.KnowledgeBase, 
 		}
 	}
 	return nil, ErrForbidden
+}
+
+// isKBOwner reports whether the caller created or owns the KB. A KB may be
+// owned by a personal workspace member who later lost the creator field, so
+// both persisted columns count.
+func isKBOwner(kb *types.KnowledgeBase, userID string) bool {
+	if kb == nil || userID == "" {
+		return false
+	}
+	return kb.CreatorID == userID || kb.OwnerUserID == userID
+}
+
+// isServicePrincipal reports whether the request was authenticated as a
+// machine principal. API keys carry no human identity; a caller without a
+// user ID is an internal service context. Both are authorized by their own
+// capability gate, so the KB guard keeps their historical admin-level access.
+func isServicePrincipal(ctx context.Context, caller types.Caller) bool {
+	if caller.UserID == "" {
+		return true
+	}
+	_, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	return ok
 }

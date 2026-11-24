@@ -145,3 +145,10 @@ func TestListKnowledgeFolders_ReturnsTree(t *testing.T) {
 		t.Fatalf("children = %+v, want \"docs/spec\"", body.Data.Folders[0].Children)
 	}
 }
+
+// KBMemberRole is a no-op for this stub. The embedded
+// interfaces.KnowledgeBaseService is nil, so without an explicit method the
+// promoted interface method panics when KB access resolution probes the role.
+func (s *stubFolderKBService) KBMemberRole(_ context.Context, _, _ string) types.KBMemberRole {
+	return ""
+}

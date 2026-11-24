@@ -243,3 +243,17 @@ type scopedBatchKBStub struct {
 func (*scopedBatchKBStub) GetKnowledgeBaseByID(context.Context, string) (*types.KnowledgeBase, error) {
 	return &types.KnowledgeBase{ID: "kb", TenantID: 1}, nil
 }
+
+// KBMemberRole is a no-op for this stub. The embedded
+// interfaces.KnowledgeBaseService is nil, so without an explicit method the
+// promoted interface method panics when KB access resolution probes the role.
+func (s *scopedKBStub) KBMemberRole(_ context.Context, _, _ string) types.KBMemberRole {
+	return ""
+}
+
+// KBMemberRole is a no-op for this stub. The embedded
+// interfaces.KnowledgeBaseService is nil, so without an explicit method the
+// promoted interface method panics when KB access resolution probes the role.
+func (s *scopedBatchKBStub) KBMemberRole(_ context.Context, _, _ string) types.KBMemberRole {
+	return ""
+}

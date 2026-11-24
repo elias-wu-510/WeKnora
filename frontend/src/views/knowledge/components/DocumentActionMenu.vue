@@ -12,6 +12,7 @@ interface KnowledgeItem {
 const props = defineProps<{
   item: KnowledgeItem;
   canDownload: boolean;
+  canDeleteKnowledge: boolean;
   canMutateKnowledge: boolean;
   traceVisible: boolean;
   /** Whether the knowledge base has a folder structure to file documents into. */
@@ -114,7 +115,7 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
   </div>
 
   <!-- 删除文档 -->
-  <t-popconfirm theme="warning"
+  <t-popconfirm v-if="canDeleteKnowledge" theme="warning"
     :content="$t('knowledgeBase.confirmDeleteDocument', { fileName })"
     :confirm-btn="{ content: $t('knowledgeBase.confirmDelete'), theme: 'danger' }"
     :cancel-btn="{ content: $t('common.cancel') }" placement="left"

@@ -242,3 +242,10 @@ func TestListKB_GracefullyDegradesWhenBatchResolveFails(t *testing.T) {
 		t.Errorf("expected fallback source=unavailable, got %v", envelope.Data[0]["vector_store_source"])
 	}
 }
+
+// KBMemberRole is a no-op for this stub. The embedded
+// interfaces.KnowledgeBaseService is nil, so without an explicit method the
+// promoted interface method panics when KB access resolution probes the role.
+func (s *stubListKBService) KBMemberRole(_ context.Context, _, _ string) types.KBMemberRole {
+	return ""
+}

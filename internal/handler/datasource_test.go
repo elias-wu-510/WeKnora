@@ -254,3 +254,10 @@ func TestDataSource_GetSyncLogs_NegativeLimitRejected(t *testing.T) {
 		t.Fatalf("expected 400 for negative limit, got %d body=%s", w.Code, w.Body.String())
 	}
 }
+
+// KBMemberRole is a no-op for this stub. The embedded
+// interfaces.KnowledgeBaseService is nil, so without an explicit method the
+// promoted interface method panics when KB access resolution probes the role.
+func (s *stubKBServiceForDS) KBMemberRole(_ context.Context, _, _ string) types.KBMemberRole {
+	return ""
+}

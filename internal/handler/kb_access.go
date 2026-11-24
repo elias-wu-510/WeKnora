@@ -56,6 +56,7 @@ func resolveHandlerKBAccessFor(c *gin.Context, kbID string, kbService middleware
 		logger.ErrorWithFields(ctx, err, nil)
 		return nil, apperrors.NewInternalServerError(err.Error())
 	}
+	request.KBMemberRole = middleware.LookupKBMemberRole(ctx, kbService, kb.ID, request.Caller.UserID)
 	grant, err := access.ResolveKB(ctx, request, kb, required, shares, agents)
 	if err == nil {
 		// Preserve authorization for body-based routes without changing the

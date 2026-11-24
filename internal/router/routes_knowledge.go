@@ -60,28 +60,28 @@ func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *r
 // #1303): the URL :id is a knowledge id, OwnedKnowledgeKBOrAdmin
 // walks it back to KB.CreatorID so a Contributor who owns the KB can
 // edit/delete any of its documents while a non-owner Contributor gets
-// 403. KB-scoped upload routes (`/knowledge-bases/:id/knowledge/...`)
-// reuse OwnedKBOrAdmin because the URL :id is the KB id directly.
-// Body-scoped batch operations have a Contributor route gate and resolve
-// their KB ownership plus Editor operation grant inside the handler.
+// 403. It also accepts an explicit kb_members admin. KB-scoped upload
+// routes (`/knowledge-bases/:id/knowledge/...`) rely on KBAccessWrite's
+// effective role because the URL :id is the KB id directly.
+// Body-scoped batch operations have no workspace-role route gate: each
+// handler resolves the effective KB role plus KB ownership itself.
 func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandler, g *rbacGuards) {
 	// 知识库下的知识路由组（URL :id is the KB id）。Scoped API key 需要
 	// ingest 能力才能写内容，且仍受 KB 范围限制；清空 KB 只允许 full-access key。
 	kb := g.apiKeyGroup(r.Group("/knowledge-bases/:id/knowledge"), apiKeyIngest(apiKeyFullAccess()))
 	kbRead := kb.With(apiKeyRetrieve(apiKeyFullAccess()))
 	{
-		// 新增内容（文件 / 链接 / 手动）只需 Contributor：C-Knowledge 共享空间里
-		// 成员默认是 contributor，若沿用 creator-or-Admin 规则，除建库人外谁都
-		// 无法投稿，而前端「添加文档」下拉对这三条入口同时可见。删除、改写既有
-		// 文档仍由 OwnedKnowledgeKBOrAdmin / KBAccessWrite 把关。
-		kb.POST("/file", g.Contributor(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromFile)
-		kb.POST("/url", g.Contributor(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromURL)
-		kb.POST("/manual", g.Contributor(), g.KBAccessWrite("id"), handler.CreateManualKnowledge)
+		// 新增内容（文件 / 链接 / 手动）由 KBAccessWrite 判定有效库角色：
+		// 空间 contributor 可投稿，空间 viewer 只要被授予 kb_members
+		// contributor/admin 也可投稿。空间 viewer 且无库角色仍拒绝。
+		kb.POST("/file", g.KBAccessWrite("id"), handler.CreateKnowledgeFromFile)
+		kb.POST("/url", g.KBAccessWrite("id"), handler.CreateKnowledgeFromURL)
+		kb.POST("/manual", g.KBAccessWrite("id"), handler.CreateManualKnowledge)
 		kbRead.GET("", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledge)
-		// 原始文件下载沿用单文件下载的 Contributor + Editor 权限边界。
-		kbRead.POST("/batch-download", g.Contributor(), g.KBAccessWrite("id"), handler.BatchDownloadKnowledge)
+		// 原始文件下载沿用单文件下载的 Editor 权限边界。
+		kbRead.POST("/batch-download", g.KBAccessWrite("id"), handler.BatchDownloadKnowledge)
 		kbRead.GET("/folders", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledgeFolders)
-		kb.PUT("/folders", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.RenameKnowledgeFolder)
+		kb.PUT("/folders", g.OwnedKBOrContributor(), g.KBAccessWrite("id"), handler.RenameKnowledgeFolder)
 		// Clearing all contents under a KB is a destructive op; gate
 		// behind Admin instead of Contributor.
 		kb.With(apiKeyFullAccess()).DELETE("", g.Admin(), g.KBAccessWrite("id"), handler.ClearKnowledgeBaseContents)
@@ -124,32 +124,34 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kRead.GET("/:id/stages", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledgeSpans)
 		kRead.GET("/:id/spans", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledgeSpans)
 		k.DELETE("/:id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.DeleteKnowledge)
-		k.PUT("/:id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateKnowledge)
-		k.POST("/:id/regenerate-summary", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.RegenerateKnowledgeSummary)
-		k.PUT("/manual/:id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateManualKnowledge)
-		k.POST("/:id/reparse", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.ReparseKnowledge)
-		k.POST("/:id/cancel-parse", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.CancelKnowledgeParse)
+		k.PUT("/:id", g.OwnedKnowledgeKBOrContributor(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateKnowledge)
+		k.POST("/:id/regenerate-summary", g.OwnedKnowledgeKBOrContributor(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.RegenerateKnowledgeSummary)
+		k.PUT("/manual/:id", g.OwnedKnowledgeKBOrContributor(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateManualKnowledge)
+		k.POST("/:id/reparse", g.OwnedKnowledgeKBOrContributor(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.ReparseKnowledge)
+		k.POST("/:id/cancel-parse", g.OwnedKnowledgeKBOrContributor(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.CancelKnowledgeParse)
 		// Downloading exposes the original source file, so it has a stricter
 		// boundary than viewing parsed content or previewing it: tenant Viewers
 		// cannot download from their own workspace, and org-shared Viewer access
 		// cannot download from the source workspace. API keys still follow the
 		// retrieve capability declared by kRead; role guards intentionally defer
 		// machine-principal authorization to the API-key gate.
-		kRead.GET("/:id/download", g.Contributor(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.DownloadKnowledgeFile)
+		kRead.GET("/:id/download", g.KBAccessWriteFromKnowledgeIDParam("id"), handler.DownloadKnowledgeFile)
 		kRead.GET("/:id/preview", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.PreviewKnowledgeFile)
-		k.PUT("/image/:id/:chunk_id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateImageInfo)
+		k.PUT("/image/:id/:chunk_id", g.OwnedKnowledgeKBOrContributor(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateImageInfo)
 		kRead.GET("/search", g.Viewer(), handler.SearchKnowledge)
 		kRead.GET("/move/progress/:task_id", g.Viewer(), handler.GetKnowledgeMoveProgress)
-		// Batch / cross-KB content writes: JWT Contributor+, or an API key
+		// Batch / cross-KB content writes: JWT effective KB contributor+, or an API key
 		// with the ingest capability (or full access). Each handler binds the
 		// operation to a single (move: source+target) KB and rejects any KB
 		// or knowledge id outside the key's allow-list, so a scoped ingest key
 		// can only touch KBs it is already permitted to write.
-		k.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
-		k.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
-		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
-		k.POST("/folder", g.Contributor(), handler.MoveKnowledgeToFolder)
-		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
+		// 有效库角色与 KB 归属在 handler 内按请求体判定；这里不再用纯空间
+		// 角色闸门，否则「空间 viewer + kb_members contributor」会被提前拒绝。
+		k.PUT("/tags", handler.UpdateKnowledgeTagBatch)
+		k.POST("/batch-reparse", handler.BatchReparseKnowledge)
+		k.POST("/batch-delete", handler.BatchDeleteKnowledge)
+		k.POST("/folder", handler.MoveKnowledgeToFolder)
+		k.POST("/move", handler.MoveKnowledge)
 	}
 }
 

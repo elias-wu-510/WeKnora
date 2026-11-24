@@ -138,9 +138,88 @@ func buildKBResponse(
 		m["vector_store_status"] = storeView.Status
 	}
 	for k, v := range extras {
-		m[k] = v
+		if k != "capabilities" {
+			m[k] = v
+			continue
+		}
+		// KnowledgeBase.MarshalJSON already publishes the storage/feature
+		// capabilities (vector/keyword/wiki/graph/faq). Merge the authorization
+		// keys into that object instead of replacing it: the editor modals read
+		// the feature flags from the same field.
+		merged, _ := m["capabilities"].(map[string]interface{})
+		if merged == nil {
+			merged = map[string]interface{}{}
+		}
+		switch authCaps := v.(type) {
+		case map[string]bool:
+			for name, allowed := range authCaps {
+				merged[name] = allowed
+			}
+		case map[string]interface{}:
+			for name, allowed := range authCaps {
+				merged[name] = allowed
+			}
+		default:
+			m[k] = v
+			continue
+		}
+		m["capabilities"] = merged
 	}
 	return m
+}
+
+// kbCapabilities derives the caller-facing action contract for one KB. The
+// grant permission is the effective role (workspace role, org share and
+// kb_members folded together). Ownership and the workspace admin bypass still
+// matter for same-tenant content edits, because those routes keep the
+// "KB creator OR Admin+" guard on top of the KB write check.
+func (h *KnowledgeBaseHandler) kbCapabilities(
+	c *gin.Context,
+	kb *types.KnowledgeBase,
+	permission types.OrgMemberRole,
+) map[string]bool {
+	ctx := c.Request.Context()
+	caller := types.CallerFromContext(ctx)
+	_, apiKey := types.TenantAPIKeyScopeFromContext(ctx)
+	servicePrincipal := apiKey || caller.UserID == ""
+	sameTenant := kb.TenantID == caller.TenantID
+	owner := caller.UserID != "" && (kb.CreatorID == caller.UserID || kb.OwnerUserID == caller.UserID)
+
+	var kbRole types.KBMemberRole
+	if caller.UserID != "" {
+		kbRole = h.service.KBMemberRole(ctx, kb.ID, caller.UserID)
+	}
+
+	canWrite := permission.HasPermission(types.OrgRoleEditor)
+	canUpload, canEdit := false, false
+	if sameTenant {
+		// A workspace Contributor can add content to any KB in the workspace
+		// (the pre-existing upload contract), but editing an existing KB's
+		// documents still requires ownership, workspace Admin+, or an explicit
+		// kb_members contributor/admin grant.
+		canUpload = canWrite && (servicePrincipal || owner ||
+			caller.Role.HasPermission(types.TenantRoleContributor) || kbRole.CanWrite())
+		canEdit = canWrite && (servicePrincipal || owner ||
+			caller.Role.HasPermission(types.TenantRoleAdmin) || kbRole.CanWrite())
+	} else {
+		// Cross-tenant access only exists through an org share (or a shared
+		// agent for reads), already capped by the caller's workspace role.
+		canUpload = canWrite
+		canEdit = canWrite
+	}
+	if kb.Type == types.KnowledgeBaseTypeFAQ {
+		// FAQ KBs are maintained through the FAQ entry routes, not document
+		// ingestion; the previous UI hid "add document" for this type.
+		canUpload = false
+	}
+
+	return map[string]bool{
+		"read":           permission.HasPermission(types.OrgRoleViewer),
+		"upload":         canUpload,
+		"edit":           canEdit,
+		"delete":         sameTenant && permission.HasPermission(types.OrgRoleAdmin),
+		"manage_members": h.requireKBAdmin(c, kb),
+	}
 }
 
 // buildKBListResponse turns a slice of knowledge bases into a JSON-ready
@@ -521,6 +600,9 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 	// callers who would only get a 403. It mirrors requireKBAdmin, the same
 	// check the write endpoints enforce, so UI and server never disagree.
 	extras["can_manage_members"] = h.requireKBAdmin(c, kb)
+	// Server-computed capability contract. The legacy can_manage_members flag
+	// stays for older frontend builds; new clients prefer capabilities.
+	extras["capabilities"] = h.kbCapabilities(c, kb, permission)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": buildKBResponse(kb, storeView, extras)})
 }
 

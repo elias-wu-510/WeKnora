@@ -110,7 +110,14 @@ func NewKnowledgeHandler(
 
 // requireKBOwnershipOrAdmin enforces the same "KB creator OR Admin+" matrix
 // used by OwnedKBOrAdmin for routes whose KB id comes from the request body.
-func (h *KnowledgeHandler) requireKBOwnershipOrAdmin(c *gin.Context, kbID string) error {
+// minKBMemberRole additionally lets an explicit kb_members grant substitute
+// for ownership, matching the URL-guard fallback used by document and KB
+// routes.
+func (h *KnowledgeHandler) requireKBOwnershipOrAdmin(
+	c *gin.Context,
+	kbID string,
+	minKBMemberRole types.KBMemberRole,
+) error {
 	evalErr := middleware.EvaluateOwnershipOrRole(
 		c.Request.Context(),
 		h.cfg,
@@ -124,6 +131,11 @@ func (h *KnowledgeHandler) requireKBOwnershipOrAdmin(c *gin.Context, kbID string
 		return errors.NewNotFoundError("knowledge base not found")
 	}
 	if goerrors.Is(evalErr, middleware.ErrOwnershipForbidden) {
+		caller := types.CallerFromContext(c.Request.Context())
+		if caller.UserID != "" && h.kbService != nil &&
+			h.kbService.KBMemberRole(c.Request.Context(), kbID, caller.UserID).HasPermission(minKBMemberRole) {
+			return nil
+		}
 		return errors.NewForbiddenError("No permission to operate on this knowledge base")
 	}
 	logger.ErrorWithFields(c.Request.Context(), evalErr, map[string]interface{}{
@@ -202,6 +214,7 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(
 		return knowledge, grant.Context(ctx), nil
 	}
 	kb := &types.KnowledgeBase{ID: knowledge.KnowledgeBaseID, TenantID: knowledge.TenantID}
+	request.KBMemberRole = middleware.LookupKBMemberRole(ctx, h.kbService, kb.ID, request.Caller.UserID)
 	grant, err := access.ResolveKB(ctx, request, kb, requiredPermission, h.kbShareService, h.agentShareService)
 	if goerrors.Is(err, access.ErrForbidden) {
 		return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
@@ -1511,7 +1524,7 @@ func (h *KnowledgeHandler) RenameKnowledgeFolder(c *gin.Context) {
 		c.Error(errors.NewForbiddenError("No permission to modify knowledge"))
 		return
 	}
-	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+	if err := h.requireKBOwnershipOrAdmin(c, kbID, types.KBMemberContributor); err != nil {
 		c.Error(err)
 		return
 	}
@@ -1569,7 +1582,7 @@ func (h *KnowledgeHandler) requireKnowledgeWriteAccess(
 	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
 		return "", 0, errors.NewForbiddenError("No permission to modify knowledge")
 	}
-	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+	if err := h.requireKBOwnershipOrAdmin(c, kbID, types.KBMemberContributor); err != nil {
 		return "", 0, err
 	}
 	return kbID, effectiveTenantID, nil
@@ -1714,7 +1727,7 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		c.Error(errors.NewForbiddenError("No permission to delete knowledge"))
 		return
 	}
-	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+	if err := h.requireKBOwnershipOrAdmin(c, kbID, types.KBMemberAdmin); err != nil {
 		c.Error(err)
 		return
 	}
@@ -2514,7 +2527,7 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 			ctx = effCtx
 		}
 	}
-	if err := h.requireKBOwnershipOrAdmin(c, authorizedKBID); err != nil {
+	if err := h.requireKBOwnershipOrAdmin(c, authorizedKBID, types.KBMemberContributor); err != nil {
 		_ = c.Error(err)
 		return
 	}
@@ -2824,7 +2837,7 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		c.Error(errors.NewForbiddenError("No permission to access source knowledge base"))
 		return
 	}
-	if err := h.requireKBOwnershipOrAdmin(c, req.SourceKBID); err != nil {
+	if err := h.requireKBOwnershipOrAdmin(c, req.SourceKBID, types.KBMemberContributor); err != nil {
 		c.Error(err)
 		return
 	}
@@ -2843,7 +2856,7 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		c.Error(errors.NewForbiddenError("No permission to access target knowledge base"))
 		return
 	}
-	if err := h.requireKBOwnershipOrAdmin(c, req.TargetKBID); err != nil {
+	if err := h.requireKBOwnershipOrAdmin(c, req.TargetKBID, types.KBMemberContributor); err != nil {
 		c.Error(err)
 		return
 	}
@@ -3108,7 +3121,7 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		c.Error(errors.NewForbiddenError("no permission to reparse knowledge in this kb"))
 		return
 	}
-	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+	if err := h.requireKBOwnershipOrAdmin(c, kbID, types.KBMemberContributor); err != nil {
 		_ = c.Error(err)
 		return
 	}

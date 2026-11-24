@@ -59,6 +59,13 @@ func (s *downloadKBStub) GetKnowledgeBaseByID(context.Context, string) (*types.K
 	return s.kb, nil
 }
 
+// KBMemberRole is part of interfaces.KnowledgeBaseService; the embedded
+// interface is nil here, so without this explicit no-op the promoted
+// method panics when KB access resolution probes the caller's KB role.
+func (s *downloadKBStub) KBMemberRole(context.Context, string, string) types.KBMemberRole {
+	return ""
+}
+
 type downloadShareStub struct {
 	interfaces.KBShareService
 	permission types.OrgMemberRole

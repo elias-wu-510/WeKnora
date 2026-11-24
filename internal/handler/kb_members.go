@@ -16,6 +16,12 @@ type AddKBMemberRequest struct {
 // workspace admins/owners, the KB owner/creator, or a kb_members admin.
 func (h *KnowledgeBaseHandler) requireKBAdmin(c *gin.Context, kb *types.KnowledgeBase) bool {
 	caller := types.CallerFromContext(c.Request.Context())
+	// Membership is a same-tenant relation: a workspace admin in another
+	// tenant must not manage this KB just because an org share made it
+	// readable. Cross-tenant callers only get the share's read/write role.
+	if kb.TenantID != caller.TenantID {
+		return false
+	}
 	if caller.Role == types.TenantRoleOwner || caller.Role == types.TenantRoleAdmin {
 		return true
 	}

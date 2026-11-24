@@ -202,3 +202,10 @@ func performHybridSearchRequest(svc interfaces.KnowledgeBaseService, body string
 	newHybridSearchTestRouter(svc).ServeHTTP(response, request)
 	return response
 }
+
+// KBMemberRole is a no-op for this stub. The embedded
+// interfaces.KnowledgeBaseService is nil, so without an explicit method the
+// promoted interface method panics when KB access resolution probes the role.
+func (s *hybridSearchTestService) KBMemberRole(_ context.Context, _, _ string) types.KBMemberRole {
+	return ""
+}

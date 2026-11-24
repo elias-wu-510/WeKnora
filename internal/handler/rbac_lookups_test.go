@@ -25,11 +25,16 @@ import (
 // loudly if a future lookup refactor reaches outside the contract.
 type stubKBService struct {
 	interfaces.KnowledgeBaseService
-	get func(ctx context.Context, id string) (*types.KnowledgeBase, error)
+	get  func(ctx context.Context, id string) (*types.KnowledgeBase, error)
+	role types.KBMemberRole
 }
 
 func (s *stubKBService) GetKnowledgeBaseByID(ctx context.Context, id string) (*types.KnowledgeBase, error) {
 	return s.get(ctx, id)
+}
+
+func (s *stubKBService) KBMemberRole(context.Context, string, string) types.KBMemberRole {
+	return s.role
 }
 
 func newKBLookupCtx(t *testing.T, tenantID uint64, paramID string) *gin.Context {

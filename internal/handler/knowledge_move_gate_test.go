@@ -52,8 +52,16 @@ func newMoveGateRouter(kb interfaces.KnowledgeBaseService, kg interfaces.Knowled
 	r := gin.New()
 	r.Use(middleware.ErrorHandler())
 	r.Use(func(c *gin.Context) {
+		// KB access now derives the effective role from the caller, so a
+		// contributor workspace role is required to reach the move gate.
 		c.Set(types.TenantIDContextKey.String(), uint64(1))
 		c.Set(types.UserIDContextKey.String(), "u-test")
+		ctx := types.WithCaller(c.Request.Context(), types.Caller{
+			TenantID: 1,
+			UserID:   "u-test",
+			Role:     types.TenantRoleContributor,
+		})
+		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	})
 	// asynqClient stays nil: every case here either rejects at the gate or
@@ -133,4 +141,11 @@ func TestMoveKnowledge_CrossStoreGate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// KBMemberRole is a no-op for this stub. The embedded
+// interfaces.KnowledgeBaseService is nil, so without an explicit method the
+// promoted interface method panics when KB access resolution probes the role.
+func (s *stubMoveKBService) KBMemberRole(_ context.Context, _, _ string) types.KBMemberRole {
+	return ""
 }

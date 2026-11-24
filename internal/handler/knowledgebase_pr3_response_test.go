@@ -186,3 +186,10 @@ func TestBuildKBResponse_KeepsVectorStoreIDForOwnerKB(t *testing.T) {
 		t.Fatalf("owner KB must surface store name, got %v", m["vector_store_name"])
 	}
 }
+
+// KBMemberRole is a no-op for this stub. The embedded
+// interfaces.KnowledgeBaseService is nil, so without an explicit method the
+// promoted interface method panics when KB access resolution probes the role.
+func (s *stubKBCreateService) KBMemberRole(_ context.Context, _, _ string) types.KBMemberRole {
+	return ""
+}
