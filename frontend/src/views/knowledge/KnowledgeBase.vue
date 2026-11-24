@@ -362,6 +362,8 @@ const isViaShare = computed(() => !!currentSharedKb.value);
 // Declared first: the canEdit / canManage gates below treat an explicit
 // cross-tenant grant as the single source of truth.
 const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
+// 服务端 requireKBAdmin 的镜像：只有库管理员能改成员；只读成员只看到名单。
+const canManageKbMembers = computed(() => kbInfo.value?.can_manage_members === true);
 
 // Can edit: when accessed via an organization share, ONLY the share grant
 // counts — even if the current user happens to be the original creator of
@@ -2988,10 +2990,14 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
               :model-value="member.role"
               :options="memberRoleOptions"
               size="small"
-              :disabled="memberSavingUserId === member.user_id"
+              :disabled="!canManageKbMembers || memberSavingUserId === member.user_id"
               @change="(value: any) => handleMemberRoleChange(member, value)"
             />
-            <t-popconfirm content="确定移除该成员？" @confirm="handleRemoveKbMember(member)">
+            <t-popconfirm
+              v-if="canManageKbMembers"
+              content="确定移除该成员？"
+              @confirm="handleRemoveKbMember(member)"
+            >
               <t-button
                 theme="danger"
                 variant="text"
@@ -3005,7 +3011,11 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
         </div>
       </t-loading>
 
-      <div class="kb-members-add">
+      <p v-if="!canManageKbMembers" class="kb-members-readonly">
+        仅知识库管理员可以调整成员权限。
+      </p>
+
+      <div v-if="canManageKbMembers" class="kb-members-add">
         <div class="kb-members-section-title">添加成员</div>
         <div class="kb-members-add-row">
           <t-select
@@ -3807,6 +3817,15 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   text-align: center;
   font-size: var(--app-text-base);
   color: var(--td-text-color-placeholder);
+}
+
+.kb-members-readonly {
+  margin: 16px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+  color: var(--td-text-color-secondary, #666);
+  font-size: 13px;
 }
 
 .kb-members-add {
