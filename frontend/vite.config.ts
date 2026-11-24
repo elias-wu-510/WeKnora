@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueJsx from '@vitejs/plugin-vue-jsx'
+import { CK_HOSTS } from './src/config/deployment'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
@@ -28,6 +29,43 @@ function resolveFrontendCommit(): string {
 }
 
 const FRONTEND_COMMIT = resolveFrontendCommit()
+
+/**
+ * 把部署形态注入 HTML，供 index.html / embed.html 的守卫脚本读取。
+ *
+ * host 列表与运行时判定同源于 src/config/deployment.ts；base 来自
+ * configResolved（构建 CLI 的 --base），所以 `/c-knowledge/` 与
+ * `/c-knowledge-test/` 两种构建不需要改 HTML。注入必须在 head 最前面，
+ * 早于页面里的内联守卫。
+ */
+function ckDeployHtml(): Plugin {
+  let base = '/'
+  return {
+    name: 'ck-deploy-html',
+    configResolved(config) {
+      base = config.base || '/'
+    },
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html) {
+        const payload = JSON.stringify({
+          base: base.replace(/\/+$/, ''),
+          hosts: [...CK_HOSTS],
+        })
+        return {
+          html,
+          tags: [
+            {
+              tag: 'script',
+              children: `window.__CK_DEPLOY__=${payload};`,
+              injectTo: 'head-prepend',
+            },
+          ],
+        }
+      },
+    },
+  }
+}
 
 /** Dev parity with nginx: serve embed.html for /embed/:channelId (not the main SPA). */
 function embedHtmlDevFallback(): Plugin {
@@ -119,6 +157,7 @@ export default defineConfig({
   plugins: [
     vue(),
     vueJsx(),
+    ckDeployHtml(),
     embedHtmlDevFallback(),
   ],
   resolve: {

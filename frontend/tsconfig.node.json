@@ -14,6 +14,10 @@
 
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "types": ["node"]
+    // vite.config.ts 会 import src/config/deployment.ts（部署形态单一来源），
+    // 该文件同时被浏览器与 Node 配置项目消费，因此 node 项目也需要 DOM 与
+    // Vite 的 import.meta.env 类型。
+    "lib": ["ES2023", "DOM"],
+    "types": ["node", "vite/client"]
   }
 }

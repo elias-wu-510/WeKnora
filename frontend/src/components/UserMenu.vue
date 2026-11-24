@@ -210,6 +210,7 @@ import { useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { CK_SUPPORT_URL, isCKnowledgeConsole } from '@/utils/ckConsole'
+import { isAdminOnlyMenuKey } from '@/config/deployment'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { logout as logoutApi } from '@/api/auth'
 import { useI18n } from 'vue-i18n'
@@ -265,7 +266,11 @@ const canManageMembers = computed(() =>
 
 // C-Knowledge 普通成员（viewer / contributor）在用户菜单里只保留个人设置与
 // 帮助入口；空间设置、成员管理、模型管理、全部设置都属于管理台能力（D2）。
-const ckNonAdmin = computed(() => isCkConsole && !authStore.hasRole('admin'))
+// 名单来自 config/deployment（与路由守卫、侧栏共用），避免各写一份管理页
+// 前缀；这里只关心「设置」是否属于管理类。CK 普通成员隐藏空间设置/全部设置。
+const ckNonAdmin = computed(() =>
+  isCkConsole && isAdminOnlyMenuKey('settings') && !authStore.hasRole('admin'),
+)
 const canManageModels = computed(() =>
   authStore.canAccessAllTenants ||
   authStore.isSystemAdmin ||
