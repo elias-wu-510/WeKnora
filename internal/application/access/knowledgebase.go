@@ -120,6 +120,7 @@ func ResolveKB(ctx context.Context, request KBRequest, kb *types.KnowledgeBase, 
 	}
 	if kb.TenantID == request.Caller.TenantID {
 		effective := ResolveEffectiveKBRole(KBRoleSources{
+			Scope:              kb.NormalizedScope(),
 			TenantRole:         request.Caller.Role,
 			KBMemberRole:       request.KBMemberRole,
 			IsKBOwner:          isKBOwner(kb, request.Caller.UserID),

@@ -418,6 +418,10 @@ const canUpload = computed(() => {
 // shared KBs only an 'admin' share grant qualifies — editor/viewer (and
 // even being the creator viewed via share) never grant delete/settings.
 const canManage = computed(() => {
+  // KB lifecycle (rename/delete/re-model) is stricter than content deletion:
+  // a kb_members admin may delete documents but not the knowledge base itself.
+  const fromManageKb = capabilityBool('manage_kb');
+  if (fromManageKb !== undefined) return fromManageKb;
   const fromCapabilities = capabilityBool('delete');
   if (fromCapabilities !== undefined) return fromCapabilities;
   const permission = effectiveKBPermission.value;

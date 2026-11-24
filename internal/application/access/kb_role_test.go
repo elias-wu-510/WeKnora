@@ -57,6 +57,39 @@ func TestResolveEffectiveKBRole(t *testing.T) {
 			want: KBRoleContributor,
 		},
 		{
+			name: "project scope ignores workspace contributor baseline",
+			sources: KBRoleSources{
+				Scope:      string(types.KBScopeProject),
+				TenantRole: types.TenantRoleContributor,
+			},
+			want: KBRoleNone,
+		},
+		{
+			name: "project scope keeps workspace admin oversight",
+			sources: KBRoleSources{
+				Scope:      string(types.KBScopeProject),
+				TenantRole: types.TenantRoleAdmin,
+			},
+			want: KBRoleAdmin,
+		},
+		{
+			name: "project scope member viewer stays viewer despite workspace contributor",
+			sources: KBRoleSources{
+				Scope:        string(types.KBScopeProject),
+				TenantRole:   types.TenantRoleContributor,
+				KBMemberRole: types.KBMemberViewer,
+			},
+			want: KBRoleViewer,
+		},
+		{
+			name: "public scope keeps workspace contributor baseline",
+			sources: KBRoleSources{
+				Scope:      string(types.KBScopePublic),
+				TenantRole: types.TenantRoleContributor,
+			},
+			want: KBRoleContributor,
+		},
+		{
 			name: "workspace viewer plus kb admin is admin",
 			sources: KBRoleSources{
 				TenantRole:   types.TenantRoleViewer,

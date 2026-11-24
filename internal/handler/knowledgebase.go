@@ -191,16 +191,17 @@ func (h *KnowledgeBaseHandler) kbCapabilities(
 	}
 
 	canWrite := permission.HasPermission(types.OrgRoleEditor)
+	projectScoped := kb.NormalizedScope() == types.KBScopeProject
+	// Project KBs are governed by their authorization table; a workspace
+	// contributor who is only a kb_members viewer stays read-only there.
+	// Public KBs keep the historical "any workspace contributor may upload".
+	spaceContributor := !projectScoped && caller.Role.HasPermission(types.TenantRoleContributor)
+	spaceAdmin := caller.Role.HasPermission(types.TenantRoleAdmin)
 	canUpload, canEdit := false, false
 	if sameTenant {
-		// A workspace Contributor can add content to any KB in the workspace
-		// (the pre-existing upload contract), but editing an existing KB's
-		// documents still requires ownership, workspace Admin+, or an explicit
-		// kb_members contributor/admin grant.
-		canUpload = canWrite && (servicePrincipal || owner ||
-			caller.Role.HasPermission(types.TenantRoleContributor) || kbRole.CanWrite())
-		canEdit = canWrite && (servicePrincipal || owner ||
-			caller.Role.HasPermission(types.TenantRoleAdmin) || kbRole.CanWrite())
+		canUpload = canWrite && (servicePrincipal || owner || spaceAdmin ||
+			spaceContributor || kbRole.CanWrite())
+		canEdit = canWrite && (servicePrincipal || owner || spaceAdmin || kbRole.CanWrite())
 	} else {
 		// Cross-tenant access only exists through an org share (or a shared
 		// agent for reads), already capped by the caller's workspace role.
@@ -213,12 +214,19 @@ func (h *KnowledgeBaseHandler) kbCapabilities(
 		canUpload = false
 	}
 
+	// manage_kb covers KB lifecycle (rename, delete, re-model). It stays with
+	// the KB owner/creator or a workspace Admin: a kb_members admin curates
+	// content and members, but cannot delete the shared knowledge base itself.
+	manageKB := sameTenant && (servicePrincipal || owner ||
+		caller.Role.HasPermission(types.TenantRoleAdmin))
+
 	return map[string]bool{
 		"read":           permission.HasPermission(types.OrgRoleViewer),
 		"upload":         canUpload,
 		"edit":           canEdit,
 		"delete":         sameTenant && permission.HasPermission(types.OrgRoleAdmin),
 		"manage_members": h.requireKBAdmin(c, kb),
+		"manage_kb":      manageKB,
 	}
 }
 

@@ -481,6 +481,14 @@ func (g *rbacGuards) OwnedKBOrAdminFromKbIDParam() gin.HandlerFunc {
 	)
 }
 
+// OwnedKBOrSpaceAdminFromKbIDParam is the strict variant for KB lifecycle
+// operations addressed by :kbId (initialization / KB config). KB creation and
+// deletion remain workspace-level: a kb_members admin curates content and
+// members, but cannot delete or re-model the shared knowledge base itself.
+func (g *rbacGuards) OwnedKBOrSpaceAdminFromKbIDParam() gin.HandlerFunc {
+	return middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.kbCreatorFromKbIDParam, g.cfg)
+}
+
 // OwnedAgentOrAdmin: same shape as OwnedKBOrAdmin but for CustomAgent.
 // Built-in agents (IsBuiltin=true) are tenant-owned; their creator
 // lookup returns "" and only Admin+ may mutate them.

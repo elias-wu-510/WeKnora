@@ -22,6 +22,7 @@ func TestKBCapabilitiesContract(t *testing.T) {
 		kbRole     types.KBMemberRole
 		creatorID  string
 		permission types.OrgMemberRole
+		scope      string
 		want       map[string]bool
 	}{
 		{
@@ -30,7 +31,7 @@ func TestKBCapabilitiesContract(t *testing.T) {
 			kbRole:     types.KBMemberContributor,
 			permission: types.OrgRoleEditor,
 			want: map[string]bool{
-				"read": true, "upload": true, "edit": true, "delete": false, "manage_members": false,
+				"read": true, "upload": true, "edit": true, "delete": false, "manage_members": false, "manage_kb": false,
 			},
 		},
 		{
@@ -39,7 +40,7 @@ func TestKBCapabilitiesContract(t *testing.T) {
 			kbRole:     types.KBMemberViewer,
 			permission: types.OrgRoleViewer,
 			want: map[string]bool{
-				"read": true, "upload": false, "edit": false, "delete": false, "manage_members": false,
+				"read": true, "upload": false, "edit": false, "delete": false, "manage_members": false, "manage_kb": false,
 			},
 		},
 		{
@@ -48,7 +49,7 @@ func TestKBCapabilitiesContract(t *testing.T) {
 			kbRole:     types.KBMemberAdmin,
 			permission: types.OrgRoleAdmin,
 			want: map[string]bool{
-				"read": true, "upload": true, "edit": true, "delete": true, "manage_members": true,
+				"read": true, "upload": true, "edit": true, "delete": true, "manage_members": true, "manage_kb": false,
 			},
 		},
 		{
@@ -56,7 +57,7 @@ func TestKBCapabilitiesContract(t *testing.T) {
 			tenantRole: types.TenantRoleAdmin,
 			permission: types.OrgRoleAdmin,
 			want: map[string]bool{
-				"read": true, "upload": true, "edit": true, "delete": true, "manage_members": true,
+				"read": true, "upload": true, "edit": true, "delete": true, "manage_members": true, "manage_kb": true,
 			},
 		},
 		{
@@ -65,7 +66,17 @@ func TestKBCapabilitiesContract(t *testing.T) {
 			creatorID:  "member",
 			permission: types.OrgRoleAdmin,
 			want: map[string]bool{
-				"read": true, "upload": true, "edit": true, "delete": true, "manage_members": true,
+				"read": true, "upload": true, "edit": true, "delete": true, "manage_members": true, "manage_kb": true,
+			},
+		},
+		{
+			name:       "project scope member viewer stays read only despite workspace contributor",
+			tenantRole: types.TenantRoleContributor,
+			kbRole:     types.KBMemberViewer,
+			permission: types.OrgRoleViewer,
+			scope:      types.KBScopeProject,
+			want: map[string]bool{
+				"read": true, "upload": false, "edit": false, "delete": false, "manage_members": false, "manage_kb": false,
 			},
 		},
 		{
@@ -73,7 +84,7 @@ func TestKBCapabilitiesContract(t *testing.T) {
 			tenantRole: types.TenantRoleViewer,
 			permission: types.OrgRoleViewer,
 			want: map[string]bool{
-				"read": true, "upload": false, "edit": false, "delete": false, "manage_members": false,
+				"read": true, "upload": false, "edit": false, "delete": false, "manage_members": false, "manage_kb": false,
 			},
 		},
 	} {
@@ -88,7 +99,7 @@ func TestKBCapabilitiesContract(t *testing.T) {
 				Role:     tt.tenantRole,
 			})
 			c.Request = req.WithContext(ctx)
-			kb := &types.KnowledgeBase{ID: "kb", TenantID: 1, CreatorID: tt.creatorID, Type: types.KnowledgeBaseTypeDocument}
+			kb := &types.KnowledgeBase{ID: "kb", TenantID: 1, CreatorID: tt.creatorID, Scope: tt.scope, Type: types.KnowledgeBaseTypeDocument}
 			require.Equal(t, tt.want, h.kbCapabilities(c, kb, tt.permission))
 		})
 	}
