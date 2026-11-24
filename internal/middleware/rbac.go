@@ -248,6 +248,119 @@ func RequireOwnershipOrRole(min types.TenantRole, lookup CreatorLookup, cfg *con
 	}
 }
 
+// RequireOwnershipOrKBMember extends RequireOwnershipOrRole with an explicit
+// per-KB grant fallback. It keeps the exact same fast paths and error mapping,
+// and only consults kb_members when the caller is authenticated, enforcement is
+// on, the resource is visible in the caller's tenant, and the ordinary
+// ownership check returned "forbidden". Cross-tenant resources never reach the
+// fallback: their creator lookup returns ErrResourceNotFound so the downstream
+// KB-access guard retains the org-share boundary.
+//
+// min is the workspace role that bypasses the ownership check (normally
+// TenantRoleAdmin); requiredKBMemberRole is the kb_members role that may
+// substitute for ownership.
+func RequireOwnershipOrKBMember(
+	min types.TenantRole,
+	requiredKBMemberRole types.KBMemberRole,
+	resolveKBID KBIDResolver,
+	lookup CreatorLookup,
+	kbService KBLookup,
+	cfg *config.Config,
+) gin.HandlerFunc {
+	warnOnNilConfig(cfg)
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		request := ownershipRequestFromContext(ctx, cfg)
+		var resolveCreator func() (string, error)
+		if lookup != nil {
+			resolveCreator = func() (string, error) { return lookup(c) }
+		}
+		decision, err := access.CheckOwnershipOrRole(request, min, resolveCreator)
+		switch {
+		case err == nil, errors.Is(err, ErrResourceNotFound):
+			logOwnershipDecision(ctx, request, min, decision, err, c.Request.URL.Path)
+			// Missing resources stay the handler's responsibility (existing 404).
+			c.Next()
+			return
+		case errors.Is(err, ErrOwnershipForbidden) && !decision.LookupFailed:
+			allowed, fallbackErr := callerHasKBMemberRole(ctx, c, resolveKBID, kbService, requiredKBMemberRole)
+			if fallbackErr != nil {
+				logger.Errorf(ctx,
+					"[rbac] kb member lookup failed: user=%s path=%s err=%v",
+					request.UserID, c.Request.URL.Path, fallbackErr)
+				c.JSON(http.StatusServiceUnavailable, gin.H{
+					"error": "Service Unavailable: cannot verify knowledge base membership",
+				})
+				c.Abort()
+				return
+			}
+			if allowed {
+				c.Next()
+				return
+			}
+			// Only record the denial after the kb_members fallback also fails;
+			// otherwise the audit trail claims a rejection that did not happen.
+			logOwnershipDecision(ctx, request, min, decision, err, c.Request.URL.Path)
+			if svc := AuditServiceFromContext(c); svc != nil {
+				tenantID := types.CallerFromContext(ctx).TenantID
+				_ = svc.LogDenied(ctx, c, tenantID, request.UserID, string(request.Role), min)
+			}
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": "Forbidden: must own the resource or have the required role",
+			})
+		default:
+			logOwnershipDecision(ctx, request, min, decision, err, c.Request.URL.Path)
+			logger.Errorf(ctx,
+				"[rbac] creator lookup failed: user=%s path=%s err=%v",
+				request.UserID, c.Request.URL.Path, err)
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "Service Unavailable: cannot verify resource ownership",
+			})
+		}
+		c.Abort()
+	}
+}
+
+// callerHasKBMemberRole is the narrow fallback used by
+// RequireOwnershipOrKBMember. It only resolves a same-tenant KB; a cross-tenant
+// KB is left to the KB-access middleware, which owns org-share semantics.
+func callerHasKBMemberRole(
+	ctx context.Context,
+	c *gin.Context,
+	resolveKBID KBIDResolver,
+	kbService KBLookup,
+	required types.KBMemberRole,
+) (bool, error) {
+	if required == "" {
+		return true, nil
+	}
+	if resolveKBID == nil || kbService == nil {
+		return false, nil
+	}
+	caller := types.CallerFromContext(ctx)
+	if caller.UserID == "" {
+		return false, nil
+	}
+	kbID, err := resolveKBID(c)
+	if err != nil {
+		// The resolver reports 4xx conditions (missing/unknown route params).
+		// Do not turn those into a 503; the handler will produce its own 404.
+		return false, nil
+	}
+	kb, err := kbService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		if isResourceNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if kb == nil || kb.TenantID != caller.TenantID {
+		return false, nil
+	}
+	role := LookupKBMemberRole(ctx, kbService, kbID, caller.UserID)
+	return role.HasPermission(required), nil
+}
+
 // rbacEnforcementEnabled reports whether middleware should actually
 // reject failed checks. When the flag is off the middleware still runs
 // role-only checks (logging, fast paths), but rejection is downgraded

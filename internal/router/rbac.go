@@ -442,11 +442,31 @@ func (g *rbacGuards) SystemAdmin() gin.HandlerFunc {
 // that bypasses the ownership check; Contributors ALWAYS pass when they
 // own the resource.
 
-// OwnedKBOrAdmin: KB mutations (update/delete/pin/copy). The original
-// creator may proceed; otherwise Admin+ is required. Contributors who
-// did not create the KB get 403 (when enforcement is on).
-func (g *rbacGuards) OwnedKBOrAdmin() gin.HandlerFunc {
+// OwnedKBOrSpaceAdmin preserves the original "KB creator or workspace Admin+"
+// rule. Organization-share management stays on this stricter guard: an
+// explicit kb_members admin can administer the KB itself, but exposing it to
+// another organization is a workspace-level boundary, not a KB-level grant.
+func (g *rbacGuards) OwnedKBOrSpaceAdmin() gin.HandlerFunc {
 	return middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.kbCreator, g.cfg)
+}
+
+// OwnedKBOrAdmin: KB mutations (update/delete/pin/copy). The original
+// creator or an explicit kb_members admin may proceed; otherwise Admin+ is
+// required. Contributors who did not create the KB get 403 (when enforcement
+// is on).
+func (g *rbacGuards) OwnedKBOrAdmin() gin.HandlerFunc {
+	return middleware.RequireOwnershipOrKBMember(
+		types.TenantRoleAdmin, types.KBMemberAdmin, middleware.KBIDFromParam("id"), g.kbCreator, g.kbService, g.cfg,
+	)
+}
+
+// OwnedKBOrContributor: content mutations on a KB itself (folder rename) that
+// an explicit kb_members contributor may perform. Workspace Contributors who
+// do not own the KB still get 403; this is not a workspace-role bypass.
+func (g *rbacGuards) OwnedKBOrContributor() gin.HandlerFunc {
+	return middleware.RequireOwnershipOrKBMember(
+		types.TenantRoleAdmin, types.KBMemberContributor, middleware.KBIDFromParam("id"), g.kbCreator, g.kbService, g.cfg,
+	)
 }
 
 // OwnedKBOrAdminFromKbIDParam is the same matrix as OwnedKBOrAdmin but
@@ -455,7 +475,10 @@ func (g *rbacGuards) OwnedKBOrAdmin() gin.HandlerFunc {
 // engine, materialising indexes — are at least as sensitive as
 // updating the KB itself, so they share the "creator OR Admin+" rule.
 func (g *rbacGuards) OwnedKBOrAdminFromKbIDParam() gin.HandlerFunc {
-	return middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.kbCreatorFromKbIDParam, g.cfg)
+	return middleware.RequireOwnershipOrKBMember(
+		types.TenantRoleAdmin, types.KBMemberAdmin, middleware.KBIDFromParam("kbId"),
+		g.kbCreatorFromKbIDParam, g.kbService, g.cfg,
+	)
 }
 
 // OwnedAgentOrAdmin: same shape as OwnedKBOrAdmin but for CustomAgent.
@@ -470,7 +493,20 @@ func (g *rbacGuards) OwnedAgentOrAdmin() gin.HandlerFunc {
 // walks it back to the owning KB's CreatorID. Same "creator OR Admin+"
 // rule as OwnedKBOrAdmin, just one chain hop deeper. PR 5 (#1303).
 func (g *rbacGuards) OwnedKnowledgeKBOrAdmin() gin.HandlerFunc {
-	return middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.knowledgeKBCreator, g.cfg)
+	return middleware.RequireOwnershipOrKBMember(
+		types.TenantRoleAdmin, types.KBMemberAdmin,
+		middleware.KBIDFromKnowledgeIDParam("id", g.knowledgeService), g.knowledgeKBCreator, g.kbService, g.cfg,
+	)
+}
+
+// OwnedKnowledgeKBOrContributor: document edits (update / reparse / cancel /
+// manual update / image edit) that an explicit kb_members contributor may
+// perform. Deletion stays on OwnedKnowledgeKBOrAdmin.
+func (g *rbacGuards) OwnedKnowledgeKBOrContributor() gin.HandlerFunc {
+	return middleware.RequireOwnershipOrKBMember(
+		types.TenantRoleAdmin, types.KBMemberContributor,
+		middleware.KBIDFromKnowledgeIDParam("id", g.knowledgeService), g.knowledgeKBCreator, g.kbService, g.cfg,
+	)
 }
 
 // OwnedChunkKBOrAdmin: chunk mutations addressed via :knowledge_id.

@@ -53,7 +53,7 @@ func TestBodyKBOwnershipSkipsUnnecessaryLookup(t *testing.T) {
 					return nil, stderrors.New("unavailable")
 				}},
 			}
-			require.NoError(t, h.requireKBOwnershipOrAdmin(c, "kb"))
+			require.NoError(t, h.requireKBOwnershipOrAdmin(c, "kb", types.KBMemberAdmin))
 		})
 	}
 }
@@ -129,7 +129,7 @@ func TestBodyKBOwnershipPreservesStatusAndTenantBoundary(t *testing.T) {
 				c.Next()
 			})
 			r.POST("/write", func(c *gin.Context) {
-				if err := h.requireKBOwnershipOrAdmin(c, "kb"); err != nil {
+				if err := h.requireKBOwnershipOrAdmin(c, "kb", types.KBMemberAdmin); err != nil {
 					_ = c.Error(err)
 					return
 				}

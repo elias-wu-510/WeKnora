@@ -19,6 +19,7 @@ import (
 // KnowledgeBaseService surface.
 type stubKBLookup struct {
 	kbs    map[string]*types.KnowledgeBase
+	roles  map[string]types.KBMemberRole
 	getErr error
 }
 
@@ -30,6 +31,12 @@ func (s *stubKBLookup) GetKnowledgeBaseByID(_ context.Context, id string) (*type
 		return kb, nil
 	}
 	return nil, apprepo.ErrKnowledgeBaseNotFound
+}
+
+// KBMemberRole makes the stub satisfy the optional KBMemberLookup interface
+// used by the access resolver; an empty role means "not an explicit member".
+func (s *stubKBLookup) KBMemberRole(_ context.Context, kbID string, _ string) types.KBMemberRole {
+	return s.roles[kbID]
 }
 
 // stubKBShareForGuard implements just the methods the guard touches —
@@ -180,6 +187,9 @@ type guardOpts struct {
 	agentID             string                  // ?agent_id query param
 	agentSourceTenantID string                  // ?agent_source_tenant_id query param
 	agentShare          *stubAgentShareForGuard // nil means "no agent-share service"
+	userID              string                  // authenticated human caller; empty = service principal
+	userRole            types.TenantRole        // defaults to viewer when userID is set
+	kbMemberRole        types.KBMemberRole      // explicit kb_members grant for kbID
 }
 
 // runGuard fires a single request through the guard and returns the
@@ -214,11 +224,22 @@ func runGuard(
 	}
 	req := httptest.NewRequest("GET", url, nil)
 	ctx := context.WithValue(req.Context(), types.TenantIDContextKey, tenantID)
+	if opts.userID != "" {
+		ctx = context.WithValue(ctx, types.UserIDContextKey, opts.userID)
+		role := opts.userRole
+		if role == "" {
+			role = types.TenantRoleViewer
+		}
+		ctx = context.WithValue(ctx, types.TenantRoleContextKey, role)
+	}
 	c.Request = req.WithContext(ctx)
 
 	kbsvc := &stubKBLookup{kbs: map[string]*types.KnowledgeBase{}}
 	if kb != nil {
 		kbsvc.kbs[kbID] = kb
+	}
+	if opts.kbMemberRole != "" {
+		kbsvc.roles = map[string]types.KBMemberRole{kbID: opts.kbMemberRole}
 	}
 
 	// Convert the package-local concrete stub types to typed interface
@@ -570,4 +591,110 @@ func TestRequireKBAccess_InvalidAgentSourceTenantID(t *testing.T) {
 	)
 	require.True(t, c.IsAborted())
 	require.NotEmpty(t, c.Errors)
+}
+
+func TestRequireKBAccess_ViewerWithKBMemberContributorCanWrite(t *testing.T) {
+	_, c := runGuard(t, 100, "kb-1", types.OrgRoleEditor,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 100}, nil,
+		guardOpts{userID: "member", userRole: types.TenantRoleViewer, kbMemberRole: types.KBMemberContributor},
+	)
+	require.False(t, c.IsAborted(), "kb contributor must satisfy the write check")
+	grant, ok := KBAccessFromContext(c)
+	require.True(t, ok)
+	require.Equal(t, types.OrgRoleEditor, grant.Permission)
+}
+
+func TestRequireKBAccess_ViewerWithKBMemberViewerCannotWrite(t *testing.T) {
+	_, c := runGuard(t, 100, "kb-1", types.OrgRoleEditor,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 100}, nil,
+		guardOpts{userID: "member", userRole: types.TenantRoleViewer, kbMemberRole: types.KBMemberViewer},
+	)
+	require.True(t, c.IsAborted())
+	require.Contains(t, c.Errors.String(), "Permission denied")
+}
+
+func TestRequireKBAccess_ViewerWithKBMemberAdminCanDelete(t *testing.T) {
+	_, c := runGuard(t, 100, "kb-1", types.OrgRoleAdmin,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 100}, nil,
+		guardOpts{userID: "member", userRole: types.TenantRoleViewer, kbMemberRole: types.KBMemberAdmin},
+	)
+	require.False(t, c.IsAborted())
+	grant, ok := KBAccessFromContext(c)
+	require.True(t, ok)
+	require.Equal(t, types.OrgRoleAdmin, grant.Permission)
+}
+
+func TestRequireKBAccess_SpaceAdminAllowsAdmin(t *testing.T) {
+	_, c := runGuard(t, 100, "kb-1", types.OrgRoleAdmin,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 100}, nil,
+		guardOpts{userID: "admin", userRole: types.TenantRoleAdmin},
+	)
+	require.False(t, c.IsAborted())
+	grant, ok := KBAccessFromContext(c)
+	require.True(t, ok)
+	require.Equal(t, types.OrgRoleAdmin, grant.Permission)
+}
+
+func TestRequireKBAccess_NonMemberNonShareForbidden(t *testing.T) {
+	_, c := runGuard(t, 100, "kb-other", types.OrgRoleViewer,
+		&types.KnowledgeBase{ID: "kb-other", TenantID: 200}, nil,
+		guardOpts{userID: "outsider", userRole: types.TenantRoleViewer},
+	)
+	require.True(t, c.IsAborted())
+	require.Contains(t, c.Errors.String(), "Permission denied")
+}
+
+func TestRequireKBAccess_MissingKBStays404(t *testing.T) {
+	_, c := runGuard(t, 100, "kb-missing", types.OrgRoleViewer, nil, nil,
+		guardOpts{userID: "member", userRole: types.TenantRoleViewer},
+	)
+	require.True(t, c.IsAborted())
+	require.Contains(t, c.Errors.String(), "not found")
+}
+
+func TestRequireOwnershipOrKBMember_FallsBackToKBMemberGrant(t *testing.T) {
+	newContext := func(t *testing.T, role types.KBMemberRole) (*httptest.ResponseRecorder, *gin.Context) {
+		t.Helper()
+		gin.SetMode(gin.TestMode)
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest("DELETE", "/knowledge-bases/kb-1", nil)
+		c.Params = gin.Params{{Key: "id", Value: "kb-1"}}
+		ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(100))
+		ctx = context.WithValue(ctx, types.UserIDContextKey, "member")
+		ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
+		c.Request = c.Request.WithContext(ctx)
+		kbsvc := &stubKBLookup{
+			kbs:   map[string]*types.KnowledgeBase{"kb-1": {ID: "kb-1", TenantID: 100, CreatorID: "creator"}},
+			roles: map[string]types.KBMemberRole{"kb-1": role},
+		}
+		guard := RequireOwnershipOrKBMember(
+			types.TenantRoleAdmin,
+			types.KBMemberAdmin,
+			KBIDFromParam("id"),
+			func(*gin.Context) (string, error) { return "creator", nil },
+			kbsvc,
+			cfgRBAC(true),
+		)
+		guard(c)
+		return rec, c
+	}
+
+	t.Run("kb admin may delete even when not creator or space admin", func(t *testing.T) {
+		rec, c := newContext(t, types.KBMemberAdmin)
+		require.False(t, c.IsAborted())
+		require.NotEqual(t, 403, rec.Code)
+	})
+
+	t.Run("kb contributor may not delete", func(t *testing.T) {
+		rec, c := newContext(t, types.KBMemberContributor)
+		require.True(t, c.IsAborted())
+		require.Equal(t, 403, rec.Code)
+	})
+
+	t.Run("no kb role is still forbidden", func(t *testing.T) {
+		rec, c := newContext(t, "")
+		require.True(t, c.IsAborted())
+		require.Equal(t, 403, rec.Code)
+	})
 }

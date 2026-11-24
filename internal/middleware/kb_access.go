@@ -44,6 +44,28 @@ type KBLookup interface {
 	GetKnowledgeBaseByID(ctx context.Context, id string) (*types.KnowledgeBase, error)
 }
 
+// KBMemberLookup is the optional part of the KB service that exposes the
+// caller's explicit kb_members grant. Keeping it separate from KBLookup lets
+// test stubs and narrow services compile unchanged: a service that does not
+// implement it simply contributes no per-KB role.
+type KBMemberLookup interface {
+	KBMemberRole(ctx context.Context, kbID string, userID string) types.KBMemberRole
+}
+
+// LookupKBMemberRole resolves the explicit kb_members role for a caller. It
+// returns the zero role when the service does not support the optional
+// interface, when the caller is anonymous, or when no row exists.
+func LookupKBMemberRole(ctx context.Context, kbService KBLookup, kbID, userID string) types.KBMemberRole {
+	if kbService == nil || kbID == "" || userID == "" {
+		return ""
+	}
+	lookup, ok := kbService.(KBMemberLookup)
+	if !ok {
+		return ""
+	}
+	return lookup.KBMemberRole(ctx, kbID, userID)
+}
+
 // KnowledgeLookup mirrors KBLookup but for resolving a knowledge id
 // (document id) back to its parent KB. Used by the chunk routes whose
 // URL param is a knowledge_id, not a kb_id.
@@ -286,5 +308,6 @@ func resolveKBAccess(
 		}
 		return nil, err
 	}
+	request.KBMemberRole = LookupKBMemberRole(ctx, kbService, kb.ID, request.Caller.UserID)
 	return access.ResolveKB(ctx, request, kb, requiredPermission, kbShareService, agentShareService)
 }

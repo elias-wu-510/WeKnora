@@ -24,9 +24,29 @@ func (r KBMemberRole) IsValid() bool {
 	}
 }
 
+// Level maps the role onto the viewer < contributor < admin ladder. An
+// empty or unknown role has no permission at all.
+func (r KBMemberRole) Level() int {
+	switch r {
+	case KBMemberViewer:
+		return 1
+	case KBMemberContributor:
+		return 2
+	case KBMemberAdmin:
+		return 3
+	default:
+		return 0
+	}
+}
+
+// HasPermission checks if this role is at least the required level.
+func (r KBMemberRole) HasPermission(required KBMemberRole) bool {
+	return r.Level() >= required.Level()
+}
+
 // CanWrite reports whether the role may add or change content in the KB.
 func (r KBMemberRole) CanWrite() bool {
-	return r == KBMemberContributor || r == KBMemberAdmin
+	return r.HasPermission(KBMemberContributor)
 }
 
 // KBMember is an explicit per-KB grant used by project-scope visibility.

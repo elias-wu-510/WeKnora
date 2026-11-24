@@ -181,3 +181,10 @@ func TestDuplicateHandler_ServiceUnexpectedError(t *testing.T) {
 		t.Fatalf("expected 500 for unexpected service error, got %d body=%s", w.Code, w.Body.String())
 	}
 }
+
+// KBMemberRole is a no-op for this stub. The embedded
+// interfaces.KnowledgeBaseService is nil, so without an explicit method the
+// promoted interface method panics when KB access resolution probes the role.
+func (s *stubKBCopyService) KBMemberRole(_ context.Context, _, _ string) types.KBMemberRole {
+	return ""
+}
