@@ -41,6 +41,9 @@ type kbSearchHit struct {
 	MatchType          string  `json:"match_type"`
 	ChunkIndex         int     `json:"chunk_index"`
 	KnowledgeBaseScope string  `json:"knowledge_base_scope"`
+	// SourceLocators point back into the original file (PDF page / region),
+	// so the result list can say「第 N 页」instead of only the chunk ordinal.
+	SourceLocators types.SourceLocators `json:"source_locators,omitempty"`
 }
 
 // SearchVisibleKnowledge runs one hybrid query across the caller's visible
@@ -242,6 +245,7 @@ func searchKnowledgeBase(
 			MatchType:          matchTypeLabel(hit.MatchType),
 			ChunkIndex:         hit.ChunkIndex,
 			KnowledgeBaseScope: kb.NormalizedScope(),
+			SourceLocators:     hit.SourceLocators,
 		})
 	}
 	return out

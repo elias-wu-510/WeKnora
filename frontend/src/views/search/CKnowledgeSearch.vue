@@ -73,6 +73,7 @@
         <p class="ck-hit__content">{{ cleanSnippet(hit.content) }}</p>
         <div class="ck-hit__meta">
           <span class="ck-hit__kb">{{ hit.knowledge_base_name }}</span>
+          <span v-if="hitPage(hit)" class="ck-hit__tag">第 {{ hitPage(hit) }} 页</span>
           <span class="ck-hit__tag ck-hit__tag--plain">第 {{ hit.chunk_index + 1 }} 段</span>
           <span v-if="hit.knowledge_base_scope === 'project'" class="ck-hit__tag">项目</span>
           <span v-else-if="hit.knowledge_base_scope === 'personal'" class="ck-hit__tag">私密</span>
@@ -107,6 +108,14 @@ const bases = ref<CkKnowledgeBase[]>([])
 const selected = ref<string[]>([])
 const query = ref('')
 const results = ref<KnowledgeSearchHit[]>([])
+
+// hitPage returns the PDF page a chunk was extracted from. Legacy chunks were
+// ingested before the parser recorded locators, so callers must treat this as
+// optional and fall back to the chunk ordinal.
+function hitPage(hit: KnowledgeSearchHit): number {
+  const locator = hit.source_locators?.find(item => typeof item.page === 'number' && item.page > 0)
+  return locator?.page ?? 0
+}
 const searchedCount = ref(0)
 const loading = ref(false)
 const hasSearched = ref(false)

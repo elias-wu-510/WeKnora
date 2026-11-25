@@ -103,6 +103,7 @@
                     <div class="reference-item__document-main">
                       <div class="reference-item__title-row">
                         <h5 class="reference-item__title" :title="item.title">{{ item.title }}</h5>
+                        <span v-if="item.page" class="reference-item__page">第 {{ item.page }} 页</span>
                         <button
                           v-if="canOpenSource(item)"
                           type="button"
@@ -645,6 +646,16 @@ watch(visible, (open) => {
     font-weight: 500;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+
+  .reference-item__page {
+    flex: none;
+    padding: 0 6px;
+    border-radius: 4px;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-xs);
+    line-height: 18px;
   }
 
   .reference-item__snippet {

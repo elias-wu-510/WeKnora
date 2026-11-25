@@ -38,6 +38,8 @@ export type ReferenceListItem = {
   knowledgeId?: string
   knowledgeBaseId?: string
   content?: string
+  /** First PDF page covered by the chunk, when the parser recorded one. */
+  page?: number
 }
 
 export type ReferenceDrawerSection = {
@@ -146,6 +148,11 @@ function resolveWebTitle(item: KnowledgeReferenceLike, url: string, domain: stri
   return domain || 'Web page'
 }
 
+function firstPage(locators?: SourceLocator[]): number | undefined {
+  const locator = locators?.find(item => typeof item.page === 'number' && item.page > 0)
+  return locator?.page
+}
+
 function buildWebItem(item: KnowledgeReferenceLike, index: number): ReferenceListItem | null {
   const url = getWebSearchUrl(item)
   if (!url) return null
@@ -189,6 +196,7 @@ function buildDocumentItem(item: KnowledgeReferenceLike, index: number): Referen
     knowledgeBaseId: item.knowledge_base_id,
     snippet: truncateText(item.content || '', 220) || undefined,
     content: item.content,
+    page: firstPage(item.source_locators),
   }
 }
 

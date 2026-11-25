@@ -187,3 +187,26 @@ test('formatReferenceSnippet strips markdown noise from preview text', async () 
 test('getDomainFromUrl strips www prefix', () => {
   assert.equal(getDomainFromUrl('https://www.example.com/x'), 'example.com')
 })
+
+test('buildReferenceList carries the first PDF page of a document chunk', () => {
+  const items = buildReferenceList([
+    {
+      id: 'chunk-paged',
+      knowledge_id: 'doc-paged',
+      knowledge_title: 'OTTV.pdf',
+      content: 'podium OTTV limit',
+      source_locators: [{ type: 'pdf', mapping: 'exact', page: 8 }],
+    },
+    {
+      id: 'chunk-legacy',
+      knowledge_id: 'doc-legacy',
+      knowledge_title: 'Legacy.pdf',
+      content: 'ingested before locators',
+    },
+  ])
+
+  const paged = items.find((item) => item.knowledgeId === 'doc-paged')
+  const legacy = items.find((item) => item.knowledgeId === 'doc-legacy')
+  assert.equal(paged?.page, 8)
+  assert.equal(legacy?.page, undefined)
+})

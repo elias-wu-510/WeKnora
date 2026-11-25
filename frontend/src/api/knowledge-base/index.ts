@@ -914,6 +914,7 @@ export interface KnowledgeSearchHit {
   match_type: string
   chunk_index: number
   knowledge_base_scope?: 'tenant' | 'project' | 'personal' | string
+  source_locators?: Array<{ type?: string; page?: number; mapping?: string }>
 }
 
 export interface KnowledgeSearchPayload {

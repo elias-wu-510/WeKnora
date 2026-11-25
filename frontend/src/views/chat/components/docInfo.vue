@@ -50,6 +50,7 @@
                             </template>
                             <span class="doc-chunk-text">
                                 <span class="doc-chunk-index">{{ $t('chat.chunkLabel', { index: cIdx + 1 }) }}</span>
+                                <span v-if="chunkPage(chunk)" class="doc-chunk-page">第 {{ chunkPage(chunk) }} 页</span>
                                 {{ truncateContent(chunk.content, 80) }}
                             </span>
                         </t-popup>
@@ -67,7 +68,16 @@ import { sanitizeHTML } from '@/utils/security';
 import ContentPopup from './tool-results/ContentPopup.vue';
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 
-const router = useRouter();
+const router = useRouter()
+
+// chunkPage reads the PDF page recorded by the parser. Chunks ingested before
+// source locators existed have none, so the label is omitted rather than faked.
+function chunkPage(chunk) {
+    const locators = chunk?.source_locators
+    if (!Array.isArray(locators)) return 0
+    const locator = locators.find(item => typeof item.page === 'number' && item.page > 0)
+    return locator?.page ?? 0
+};
 const { t } = useI18n();
 const referencesDrawer = useChatReferencesDrawer();
 
@@ -483,6 +493,12 @@ const getWebSearchDisplayText = (item) => {
         }
 
         .doc-chunk-index {
+            color: var(--td-text-color-placeholder);
+            font-size: var(--app-text-xs);
+            margin-right: 4px;
+        }
+
+        .doc-chunk-page {
             color: var(--td-text-color-placeholder);
             font-size: var(--app-text-xs);
             margin-right: 4px;
