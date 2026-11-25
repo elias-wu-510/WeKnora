@@ -18,6 +18,7 @@ import (
 )
 
 type downloadKnowledgeLookup struct {
+	interfaces.KnowledgeService
 	knowledge *types.Knowledge
 }
 
@@ -70,11 +71,19 @@ func newKnowledgeDownloadRouteTestEngine(
 	r.Use(func(c *gin.Context) {
 		ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(1))
 		ctx = context.WithValue(ctx, types.TenantRoleContextKey, role)
+		// Seed a real caller: without it the compatibility path treats the
+		// request as a service principal and skips the role gate.
+		ctx = types.WithCaller(ctx, types.Caller{TenantID: 1, UserID: "test-user", Role: role})
 		c.Request = c.Request.WithContext(ctx)
 		c.Set(types.TenantIDContextKey.String(), uint64(1))
 		c.Next()
 	})
-	RegisterKnowledgeRoutes(r.Group("/api/v1"), &handler.KnowledgeHandler{}, guards)
+	h := handler.NewKnowledgeHandler(
+		nil,
+		&downloadKnowledgeLookup{knowledge: knowledge},
+		nil, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	RegisterKnowledgeRoutes(r.Group("/api/v1"), h, guards)
 	return r
 }
 

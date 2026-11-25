@@ -69,6 +69,21 @@ func (s *stubKBRepoForModelDelete) ListUserKBPinIDs(context.Context, uint64, str
 	return nil, nil
 }
 
+func (s *stubKBRepoForModelDelete) ListKnowledgeBaseIDsForMember(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+func (s *stubKBRepoForModelDelete) ListKBMembers(context.Context, string) ([]*types.KBMember, error) {
+	return nil, nil
+}
+func (s *stubKBRepoForModelDelete) GetKBMember(context.Context, string, string) (*types.KBMember, error) {
+	return nil, nil
+}
+func (s *stubKBRepoForModelDelete) UpsertKBMember(_ context.Context, m *types.KBMember) (*types.KBMember, error) {
+	return m, nil
+}
+func (s *stubKBRepoForModelDelete) DeleteKBMember(context.Context, string, string) error { return nil }
+func (s *stubKBRepoForModelDelete) DeleteKBMembersByKB(context.Context, string) error    { return nil }
+
 type stubAgentRepoForModelDelete struct {
 	usages   []types.ModelUsageResource
 	count    *int64

@@ -157,6 +157,28 @@ func (r *fakeKBRepo) ListUserKBPinIDs(_ context.Context, _ uint64, _ string) (ma
 	return map[string]time.Time{}, nil
 }
 
+// KB member grants: the fake keeps no state; tests that need grants assert on
+// the service layer instead of the repository.
+func (r *fakeKBRepo) ListKnowledgeBaseIDsForMember(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
+
+func (r *fakeKBRepo) ListKBMembers(_ context.Context, _ string) ([]*types.KBMember, error) {
+	return nil, nil
+}
+
+func (r *fakeKBRepo) GetKBMember(_ context.Context, _, _ string) (*types.KBMember, error) {
+	return nil, nil
+}
+
+func (r *fakeKBRepo) UpsertKBMember(_ context.Context, member *types.KBMember) (*types.KBMember, error) {
+	return member, nil
+}
+
+func (r *fakeKBRepo) DeleteKBMember(_ context.Context, _, _ string) error { return nil }
+
+func (r *fakeKBRepo) DeleteKBMembersByKB(_ context.Context, _ string) error { return nil }
+
 // Force compile-time conformance check so any future interface change
 // surfaces as a build error here rather than at usage site.
 var _ interfaces.KnowledgeBaseRepository = (*fakeKBRepo)(nil)
@@ -171,6 +193,13 @@ func newPR3KBService(repo *fakeKBRepo, registry *fakeRegistry, ownership *fakeOw
 
 func ctxWithTenant(tenantID uint64) context.Context {
 	return context.WithValue(context.Background(), types.TenantIDContextKey, tenantID)
+}
+
+// ctxAsAdmin marks the caller as a workspace admin so tenant-wide KB creation
+// (the production default) stays permitted; these tests exercise storage and
+// vector-store binding, not the role gate.
+func ctxAsAdmin(ctx context.Context) context.Context {
+	return types.WithCaller(ctx, types.Caller{TenantID: 1, UserID: "test-admin", Role: types.TenantRoleAdmin})
 }
 
 func ctxWithTenantStorage(tenantID uint64, defaultProvider string) context.Context {
@@ -188,11 +217,11 @@ func TestCreateKnowledgeBase_DefaultStorageProviderFromTenant(t *testing.T) {
 	repo := newFakeKBRepo()
 	svc := newPR3KBService(repo, &fakeRegistry{registered: map[string]struct{}{}}, &fakeOwnership{})
 
-	kb, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, "minio"), &types.KnowledgeBase{Name: "kb"})
+	kb, err := svc.CreateKnowledgeBase(ctxAsAdmin(ctxWithTenantStorage(1, "minio")), &types.KnowledgeBase{Name: "kb"})
 	require.NoError(t, err)
 	assert.Equal(t, "minio", kb.GetStorageProvider())
 
-	kbExplicit, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, "minio"), &types.KnowledgeBase{
+	kbExplicit, err := svc.CreateKnowledgeBase(ctxAsAdmin(ctxWithTenantStorage(1, "minio")), &types.KnowledgeBase{
 		Name:                  "kb2",
 		StorageProviderConfig: &types.StorageProviderConfig{Provider: "cos"},
 	})
@@ -205,11 +234,11 @@ func TestCreateKnowledgeBase_DefaultStorageProviderRespectsAllowList(t *testing.
 	repo := newFakeKBRepo()
 	svc := newPR3KBService(repo, &fakeRegistry{registered: map[string]struct{}{}}, &fakeOwnership{})
 
-	kb, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, ""), &types.KnowledgeBase{Name: "kb"})
+	kb, err := svc.CreateKnowledgeBase(ctxAsAdmin(ctxWithTenantStorage(1, "")), &types.KnowledgeBase{Name: "kb"})
 	require.NoError(t, err)
 	assert.Equal(t, "minio", kb.GetStorageProvider())
 
-	kbDisallowedDefault, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, "local"), &types.KnowledgeBase{Name: "kb2"})
+	kbDisallowedDefault, err := svc.CreateKnowledgeBase(ctxAsAdmin(ctxWithTenantStorage(1, "local")), &types.KnowledgeBase{Name: "kb2"})
 	require.NoError(t, err)
 	assert.Equal(t, "minio", kbDisallowedDefault.GetStorageProvider())
 }
@@ -227,7 +256,7 @@ func TestCreateKnowledgeBase_VectorStoreBinding(t *testing.T) {
 			&fakeRegistry{registered: registered},
 			&fakeOwnership{owned: map[string]uint64{validKBStoreUUID: 1}},
 		)
-		kb, err := svc.CreateKnowledgeBase(ctxWithTenant(1), &types.KnowledgeBase{Name: "kb"})
+		kb, err := svc.CreateKnowledgeBase(ctxAsAdmin(ctxWithTenant(1)), &types.KnowledgeBase{Name: "kb"})
 		require.NoError(t, err)
 		assert.Nil(t, kb.VectorStoreID)
 		assert.Len(t, repo.rows, 1)
@@ -240,7 +269,7 @@ func TestCreateKnowledgeBase_VectorStoreBinding(t *testing.T) {
 			&fakeOwnership{},
 		)
 		empty := ""
-		kb, err := svc.CreateKnowledgeBase(ctxWithTenant(1), &types.KnowledgeBase{Name: "kb", VectorStoreID: &empty})
+		kb, err := svc.CreateKnowledgeBase(ctxAsAdmin(ctxWithTenant(1)), &types.KnowledgeBase{Name: "kb", VectorStoreID: &empty})
 		require.NoError(t, err)
 		assert.Nil(t, kb.VectorStoreID)
 	})
@@ -252,7 +281,7 @@ func TestCreateKnowledgeBase_VectorStoreBinding(t *testing.T) {
 			&fakeOwnership{},
 		)
 		bad := "not-a-uuid"
-		_, err := svc.CreateKnowledgeBase(ctxWithTenant(1), &types.KnowledgeBase{Name: "kb", VectorStoreID: &bad})
+		_, err := svc.CreateKnowledgeBase(ctxAsAdmin(ctxWithTenant(1)), &types.KnowledgeBase{Name: "kb", VectorStoreID: &bad})
 		require.Error(t, err)
 		appErr, ok := apperrors.IsAppError(err)
 		require.True(t, ok)
@@ -268,7 +297,7 @@ func TestCreateKnowledgeBase_VectorStoreBinding(t *testing.T) {
 			&fakeOwnership{owned: map[string]uint64{validKBStoreUUID: 1}},
 		)
 		id := validKBStoreUUID
-		kb, err := svc.CreateKnowledgeBase(ctxWithTenant(1), &types.KnowledgeBase{Name: "kb", VectorStoreID: &id})
+		kb, err := svc.CreateKnowledgeBase(ctxAsAdmin(ctxWithTenant(1)), &types.KnowledgeBase{Name: "kb", VectorStoreID: &id})
 		require.NoError(t, err)
 		require.NotNil(t, kb.VectorStoreID)
 		assert.Equal(t, validKBStoreUUID, *kb.VectorStoreID)
@@ -281,7 +310,7 @@ func TestCreateKnowledgeBase_VectorStoreBinding(t *testing.T) {
 			&fakeOwnership{owned: map[string]uint64{validKBStoreUUID: 2}}, // owned by tenant 2
 		)
 		id := validKBStoreUUID
-		_, err := svc.CreateKnowledgeBase(ctxWithTenant(1), &types.KnowledgeBase{Name: "kb", VectorStoreID: &id})
+		_, err := svc.CreateKnowledgeBase(ctxAsAdmin(ctxWithTenant(1)), &types.KnowledgeBase{Name: "kb", VectorStoreID: &id})
 		require.Error(t, err)
 		appErr, ok := apperrors.IsAppError(err)
 		require.True(t, ok)
@@ -295,7 +324,7 @@ func TestCreateKnowledgeBase_VectorStoreBinding(t *testing.T) {
 			&fakeOwnership{owned: map[string]uint64{validKBStoreUUID: 1}},
 		)
 		id := validKBStoreUUID
-		_, err := svc.CreateKnowledgeBase(ctxWithTenant(1), &types.KnowledgeBase{Name: "kb", VectorStoreID: &id})
+		_, err := svc.CreateKnowledgeBase(ctxAsAdmin(ctxWithTenant(1)), &types.KnowledgeBase{Name: "kb", VectorStoreID: &id})
 		require.Error(t, err)
 		appErr, ok := apperrors.IsAppError(err)
 		require.True(t, ok)
@@ -309,7 +338,7 @@ func TestCreateKnowledgeBase_VectorStoreBinding(t *testing.T) {
 			&fakeOwnership{err: stderrors.New("db down")},
 		)
 		id := validKBStoreUUID
-		_, err := svc.CreateKnowledgeBase(ctxWithTenant(1), &types.KnowledgeBase{Name: "kb", VectorStoreID: &id})
+		_, err := svc.CreateKnowledgeBase(ctxAsAdmin(ctxWithTenant(1)), &types.KnowledgeBase{Name: "kb", VectorStoreID: &id})
 		require.Error(t, err)
 		appErr, ok := apperrors.IsAppError(err)
 		require.True(t, ok)

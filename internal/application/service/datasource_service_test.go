@@ -92,6 +92,22 @@ func (s *processSyncKBService) ListKnowledgeBasesByTenantID(context.Context, uin
 	return nil, nil
 }
 
+func (s *processSyncKBService) ListKBMembers(context.Context, string) ([]*types.KBMember, error) {
+	return nil, nil
+}
+
+func (s *processSyncKBService) KBMemberRole(context.Context, string, string) types.KBMemberRole {
+	return ""
+}
+
+func (s *processSyncKBService) UpsertKBMember(
+	context.Context, string, string, types.KBMemberRole,
+) (*types.KBMember, error) {
+	return nil, nil
+}
+
+func (s *processSyncKBService) RemoveKBMember(context.Context, string, string) error { return nil }
+
 func (s *processSyncKBService) UpdateKnowledgeBase(
 	context.Context, string, string, string, *types.KnowledgeBaseConfig,
 ) (*types.KnowledgeBase, error) {

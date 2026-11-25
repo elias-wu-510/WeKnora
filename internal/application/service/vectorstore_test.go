@@ -829,6 +829,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     description TEXT,
     tenant_id INTEGER NOT NULL,
     creator_id VARCHAR(36),
+    scope VARCHAR(16) NOT NULL DEFAULT 'tenant',
+    owner_user_id VARCHAR(36),
     type VARCHAR(32) NOT NULL DEFAULT 'document',
     chunking_config TEXT NOT NULL DEFAULT '{}',
     image_processing_config TEXT NOT NULL DEFAULT '{}',
@@ -977,6 +979,23 @@ func (r *realKBRepo) ListUserKBPinIDs(_ context.Context, _ uint64, _ string) (ma
 }
 func (r *realKBRepo) SetUserKBPin(_ context.Context, _ uint64, _ string, _ string, _ bool) (*time.Time, error) {
 	return nil, nil
+}
+
+func (r *realKBRepo) ListKnowledgeBaseIDsForMember(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
+func (r *realKBRepo) ListKBMembers(_ context.Context, _ string) ([]*types.KBMember, error) {
+	return nil, nil
+}
+func (r *realKBRepo) GetKBMember(_ context.Context, _, _ string) (*types.KBMember, error) {
+	return nil, nil
+}
+func (r *realKBRepo) UpsertKBMember(_ context.Context, m *types.KBMember) (*types.KBMember, error) {
+	return m, nil
+}
+func (r *realKBRepo) DeleteKBMember(_ context.Context, _, _ string) error { return nil }
+func (r *realKBRepo) DeleteKBMembersByKB(_ context.Context, _ string) error {
+	return nil
 }
 
 func insertGuardStore(t *testing.T, db *gorm.DB, id string, tenantID uint64) {
