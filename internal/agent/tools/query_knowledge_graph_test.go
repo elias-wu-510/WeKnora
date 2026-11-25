@@ -46,6 +46,24 @@ func (s *stubKnowledgeBaseService) ListKnowledgeBasesByTenantID(context.Context,
 	return nil, nil
 }
 
+func (s *stubKnowledgeBaseService) ListKBMembers(context.Context, string) ([]*types.KBMember, error) {
+	return nil, nil
+}
+
+func (s *stubKnowledgeBaseService) KBMemberRole(context.Context, string, string) types.KBMemberRole {
+	return ""
+}
+
+func (s *stubKnowledgeBaseService) UpsertKBMember(
+	context.Context, string, string, types.KBMemberRole,
+) (*types.KBMember, error) {
+	return nil, nil
+}
+
+func (s *stubKnowledgeBaseService) RemoveKBMember(context.Context, string, string) error {
+	return nil
+}
+
 func (s *stubKnowledgeBaseService) UpdateKnowledgeBase(
 	context.Context,
 	string,
