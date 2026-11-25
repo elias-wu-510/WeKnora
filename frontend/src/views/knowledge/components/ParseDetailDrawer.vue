@@ -20,10 +20,14 @@ export interface ParseDetailItem extends ParseStatusItem {
   type?: string;
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   visible: boolean;
   item: ParseDetailItem | null;
-}>();
+  /** Retry mutates the document; read-only callers must not see the action. */
+  canRetry?: boolean;
+}>(), {
+  canRetry: true,
+});
 
 const emit = defineEmits<{
   (e: 'update:visible', visible: boolean): void;
@@ -150,7 +154,7 @@ const cancelParse = () => {
     <template #footer>
       <div class="pd-actions">
         <t-button v-if="view.kind === 'stalled'" theme="warning" @click="cancelParse">停止解析</t-button>
-        <t-button v-else-if="view.canRetry" theme="primary" @click="retry">重新解析</t-button>
+        <t-button v-else-if="view.canRetry && canRetry" theme="primary" @click="retry">重新解析</t-button>
         <t-button variant="outline" @click="close">关闭</t-button>
       </div>
     </template>

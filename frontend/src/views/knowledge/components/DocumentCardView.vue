@@ -547,7 +547,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
         >
           <div class="card-status-head">
             <ParseStatusBadge :item="item" size="md" @open-detail="openParseDetail(item)" />
-            <button type="button" class="card-reparse-link" @click.stop="handleAction('reparse', item)">
+            <button v-if="canMutateKnowledge" type="button" class="card-reparse-link" @click.stop="handleAction('reparse', item)">
               重新解析
             </button>
             <button
@@ -572,7 +572,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
         </div>
         <div v-else-if="parseStatus(item).kind === 'cancelled'" class="card-analyze card-cancelled">
           <ParseStatusBadge :item="item" size="md" @open-detail="openParseDetail(item)" />
-          <button type="button" class="card-reparse-link" @click.stop="handleAction('reparse', item)">
+          <button v-if="canMutateKnowledge" type="button" class="card-reparse-link" @click.stop="handleAction('reparse', item)">
             重新解析
           </button>
         </div>
@@ -622,6 +622,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   <ParseDetailDrawer
     v-model:visible="parseDetailVisible"
     :item="parseDetailItem"
+    :can-retry="canMutateKnowledge"
     @reparse="onDetailReparse"
     @cancel-parse="onDetailCancelParse"
   />

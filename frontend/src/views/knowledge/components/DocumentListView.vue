@@ -295,7 +295,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
           />
           <span v-else class="row-muted">--</span>
           <button
-            v-if="parseStatus(item).kind === 'failed' || parseStatus(item).kind === 'cancelled'"
+            v-if="canMutateKnowledge && (parseStatus(item).kind === 'failed' || parseStatus(item).kind === 'cancelled')"
             type="button"
             class="row-reparse-btn"
             :title="`重新解析「${item.file_name}」`"
@@ -417,6 +417,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   <ParseDetailDrawer
     v-model:visible="parseDetailVisible"
     :item="parseDetailItem"
+    :can-retry="canMutateKnowledge"
     @reparse="onDetailReparse"
     @cancel-parse="onDetailCancelParse"
   />
