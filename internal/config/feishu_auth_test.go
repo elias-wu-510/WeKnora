@@ -48,16 +48,16 @@ func TestFeishuAuthDisabledByDefault(t *testing.T) {
 
 func TestDefaultSharedTenantIDFallsBack(t *testing.T) {
 	t.Setenv("WEKNORA_SHARED_TENANT_ID", "not-a-number")
-	if got := defaultSharedTenantID(); got != 10000 {
-		t.Fatalf("defaultSharedTenantID() = %d, want 10000 fallback", got)
+	if got := DefaultSharedTenantID(); got != 10000 {
+		t.Fatalf("DefaultSharedTenantID() = %d, want 10000 fallback", got)
 	}
 	t.Setenv("WEKNORA_SHARED_TENANT_ID", "0")
-	if got := defaultSharedTenantID(); got != 10000 {
-		t.Fatalf("defaultSharedTenantID() = %d, want 10000 fallback for zero", got)
+	if got := DefaultSharedTenantID(); got != 10000 {
+		t.Fatalf("DefaultSharedTenantID() = %d, want 10000 fallback for zero", got)
 	}
 	t.Setenv("WEKNORA_SHARED_TENANT_ID", "42")
-	if got := defaultSharedTenantID(); got != 42 {
-		t.Fatalf("defaultSharedTenantID() = %d, want 42", got)
+	if got := DefaultSharedTenantID(); got != 42 {
+		t.Fatalf("DefaultSharedTenantID() = %d, want 42", got)
 	}
 }
 
