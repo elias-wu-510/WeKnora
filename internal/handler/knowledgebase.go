@@ -92,16 +92,77 @@ func (h *KnowledgeBaseHandler) resolveResourceRewriter(c *gin.Context) (*storage
 	return storageurl.NewRequestRewriter(ctx, mode, h.fileService, h.storageResolver), nil
 }
 
+// kbResponseExtras is the typed set of view-specific fields that callers may
+// merge into a knowledge-base response. It replaces the former
+// map[string]interface{} extras so every key that can reach the wire is
+// declared here and its omit-when-empty behavior is explicit.
+//
+// CanManageMembers is a pointer on purpose: the GET-detail handler always
+// sets it (so false is a meaningful, present value for callers who are not
+// admins), while list/create/update responses omit it entirely. A plain bool
+// cannot express that distinction without a second presence flag.
+type kbResponseExtras struct {
+	MyPermission     string          `json:"my_permission,omitempty"`
+	CanManageMembers *bool           `json:"can_manage_members,omitempty"`
+	Capabilities     map[string]bool `json:"capabilities,omitempty"`
+}
+
+// applyTo merges the extras into an already-decoded KB object. Capabilities
+// are special: KnowledgeBase.MarshalJSON already publishes the storage/feature
+// flags (vector/keyword/wiki/graph/faq), so the authorization keys are merged
+// into that object instead of replacing it — the editor modals read the
+// feature flags from the same field.
+func (e kbResponseExtras) applyTo(m map[string]json.RawMessage) error {
+	if e.MyPermission != "" {
+		raw, err := json.Marshal(e.MyPermission)
+		if err != nil {
+			return err
+		}
+		m["my_permission"] = raw
+	}
+	if e.CanManageMembers != nil {
+		raw, err := json.Marshal(*e.CanManageMembers)
+		if err != nil {
+			return err
+		}
+		m["can_manage_members"] = raw
+	}
+	if len(e.Capabilities) > 0 {
+		merged := map[string]json.RawMessage{}
+		if existing, ok := m["capabilities"]; ok {
+			if err := json.Unmarshal(existing, &merged); err != nil {
+				return err
+			}
+			if merged == nil {
+				merged = map[string]json.RawMessage{}
+			}
+		}
+		for name, allowed := range e.Capabilities {
+			raw, err := json.Marshal(allowed)
+			if err != nil {
+				return err
+			}
+			merged[name] = raw
+		}
+		raw, err := json.Marshal(merged)
+		if err != nil {
+			return err
+		}
+		m["capabilities"] = raw
+	}
+	return nil
+}
+
 // buildKBResponse turns a knowledge base into a JSON-ready response shape,
 // merging the bound vector store's display metadata and any caller-supplied
-// extras (e.g., my_permission for shared KBs). Returns the kb pointer
-// unchanged on serialization failure so the request still succeeds.
+// extras (e.g., my_permission for shared KBs). Returns nil only if the
+// KnowledgeBase itself cannot be marshaled; its fields are all plain data, so
+// that branch is not reachable in practice.
 //
 // The map-merge approach (rather than a wrapper struct embedding the kb)
 // is deliberate: KnowledgeBase has a custom MarshalJSON, and embedding
 // would promote it to any wrapper struct and silently swallow the extra
-// fields. The same pattern is already used by GetKnowledgeBase to add the
-// my_permission field for shared knowledge bases.
+// fields.
 //
 // Shared-KB suppression: when storeView.Source == StoreSourceShared (the
 // caller is not the KB owner), the raw vector_store_id UUID is stripped
@@ -112,60 +173,42 @@ func (h *KnowledgeBaseHandler) resolveResourceRewriter(c *gin.Context) (*storage
 func buildKBResponse(
 	kb *types.KnowledgeBase,
 	storeView types.StoreDisplay,
-	extras map[string]interface{},
-) interface{} {
+	extras kbResponseExtras,
+) map[string]json.RawMessage {
 	b, err := json.Marshal(kb)
 	if err != nil {
-		return kb
+		return nil
 	}
-	var m map[string]interface{}
+	var m map[string]json.RawMessage
 	if err := json.Unmarshal(b, &m); err != nil || m == nil {
-		return kb
+		return nil
 	}
 	if storeView.Source == types.StoreSourceShared {
 		delete(m, "vector_store_id")
 	}
 	if storeView.Name != "" {
-		m["vector_store_name"] = storeView.Name
+		m["vector_store_name"] = jsonString(storeView.Name)
 	}
 	if storeView.Source != "" {
-		m["vector_store_source"] = storeView.Source
+		m["vector_store_source"] = jsonString(storeView.Source)
 	}
 	if storeView.EngineType != "" {
-		m["vector_store_engine_type"] = storeView.EngineType
+		m["vector_store_engine_type"] = jsonString(storeView.EngineType)
 	}
 	if storeView.Status != "" {
-		m["vector_store_status"] = storeView.Status
+		m["vector_store_status"] = jsonString(storeView.Status)
 	}
-	for k, v := range extras {
-		if k != "capabilities" {
-			m[k] = v
-			continue
-		}
-		// KnowledgeBase.MarshalJSON already publishes the storage/feature
-		// capabilities (vector/keyword/wiki/graph/faq). Merge the authorization
-		// keys into that object instead of replacing it: the editor modals read
-		// the feature flags from the same field.
-		merged, _ := m["capabilities"].(map[string]interface{})
-		if merged == nil {
-			merged = map[string]interface{}{}
-		}
-		switch authCaps := v.(type) {
-		case map[string]bool:
-			for name, allowed := range authCaps {
-				merged[name] = allowed
-			}
-		case map[string]interface{}:
-			for name, allowed := range authCaps {
-				merged[name] = allowed
-			}
-		default:
-			m[k] = v
-			continue
-		}
-		m["capabilities"] = merged
+	if err := extras.applyTo(m); err != nil {
+		return nil
 	}
 	return m
+}
+
+// jsonString encodes a known-valid Go string as a JSON string value. It cannot
+// fail for plain strings, so callers can assign the result directly.
+func jsonString(s string) json.RawMessage {
+	b, _ := json.Marshal(s)
+	return b
 }
 
 // kbCapabilities derives the caller-facing action contract for one KB. The
@@ -265,9 +308,18 @@ func (h *KnowledgeBaseHandler) buildKBListResponse(
 				view = v
 			}
 		}
-		out = append(out, buildKBResponse(kb, view, nil))
+		out = append(out, buildKBResponse(kb, view, kbResponseExtras{}))
 	}
 	return out
+}
+
+// sharedKBRowExtras is the typed set of view-specific keys some share
+// endpoints add next to a shared KB row. IsMine is a pointer so the plain
+// "shared with me" listing can omit it while the space-scoped listing always
+// emits it (false is a meaningful value there).
+type sharedKBRowExtras struct {
+	IsMine          *bool                      `json:"is_mine,omitempty"`
+	SourceFromAgent *types.SourceFromAgentInfo `json:"source_from_agent,omitempty"`
 }
 
 // sharedKBRow projects a SharedKnowledgeBaseInfo into a response payload
@@ -287,9 +339,9 @@ func (h *KnowledgeBaseHandler) buildKBListResponse(
 // or duplicating the lookup logic — both larger than the security fix
 // warrants and easy to follow up on once needed.
 func sharedKBRow(
-	info *types.SharedKnowledgeBaseInfo, extras map[string]interface{},
+	info *types.SharedKnowledgeBaseInfo, extras sharedKBRowExtras,
 ) map[string]interface{} {
-	kbView := buildKBResponse(info.KnowledgeBase, types.SharedStoreDisplay(), nil)
+	kbView := buildKBResponse(info.KnowledgeBase, types.SharedStoreDisplay(), kbResponseExtras{})
 	row := map[string]interface{}{
 		"knowledge_base":   kbView,
 		"share_id":         info.ShareID,
@@ -299,8 +351,11 @@ func sharedKBRow(
 		"source_tenant_id": info.SourceTenantID,
 		"shared_at":        info.SharedAt,
 	}
-	for k, v := range extras {
-		row[k] = v
+	if extras.IsMine != nil {
+		row["is_mine"] = *extras.IsMine
+	}
+	if extras.SourceFromAgent != nil {
+		row["source_from_agent"] = extras.SourceFromAgent
 	}
 	return row
 }
@@ -552,7 +607,7 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
+		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), kbResponseExtras{}),
 	})
 }
 
@@ -599,18 +654,19 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 	}
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	storeView := h.resolveKBStoreView(c.Request.Context(), kb, tenantID)
-	extras := map[string]interface{}{}
+	extras := kbResponseExtras{}
 	if kb.TenantID != tenantID && permission != "" {
 		// Include my_permission in data so frontend can show role (e.g. "只读") instead of "--" for agent-visible KBs
-		extras["my_permission"] = permission
+		extras.MyPermission = string(permission)
 	}
 	// can_manage_members lets the members dialog hide add/remove controls for
 	// callers who would only get a 403. It mirrors requireKBAdmin, the same
 	// check the write endpoints enforce, so UI and server never disagree.
-	extras["can_manage_members"] = h.requireKBAdmin(c, kb)
+	canManageMembers := h.requireKBAdmin(c, kb)
+	extras.CanManageMembers = &canManageMembers
 	// Server-computed capability contract. The legacy can_manage_members flag
 	// stays for older frontend builds; new clients prefer capabilities.
-	extras["capabilities"] = h.kbCapabilities(c, kb, permission)
+	extras.Capabilities = h.kbCapabilities(c, kb, permission)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": buildKBResponse(kb, storeView, extras)})
 }
 
@@ -822,7 +878,7 @@ func (h *KnowledgeBaseHandler) TogglePinKnowledgeBase(c *gin.Context) {
 	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
+		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), kbResponseExtras{}),
 	})
 }
 
@@ -901,7 +957,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
+		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), kbResponseExtras{}),
 	})
 }
 
@@ -1235,7 +1291,7 @@ func (h *KnowledgeBaseHandler) DuplicateKnowledgeBase(c *gin.Context) {
 			SourceID:      sourceID,
 			TargetID:      targetKB.ID,
 			Message:       "Knowledge base duplicate created",
-			KnowledgeBase: buildKBResponse(targetKB, h.resolveKBStoreView(ctx, targetKB, callerTenantID), nil),
+			KnowledgeBase: buildKBResponse(targetKB, h.resolveKBStoreView(ctx, targetKB, callerTenantID), kbResponseExtras{}),
 		},
 	})
 }

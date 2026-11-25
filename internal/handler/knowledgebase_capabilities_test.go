@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -109,17 +110,17 @@ func TestKBCapabilitiesContract(t *testing.T) {
 // auth keys while merging the pre-existing feature capabilities map.
 func TestKBCapabilitiesMergeKeepsFeatureFlags(t *testing.T) {
 	kb := &types.KnowledgeBase{ID: "kb", TenantID: 1, Type: types.KnowledgeBaseTypeDocument}
-	merged := buildKBResponse(kb, types.StoreDisplay{}, map[string]interface{}{
-		"capabilities": map[string]bool{"read": true, "upload": false, "edit": false, "delete": false, "manage_members": false},
+	merged := buildKBResponse(kb, types.StoreDisplay{}, kbResponseExtras{
+		Capabilities: map[string]bool{"read": true, "upload": false, "edit": false, "delete": false, "manage_members": false},
 	})
-	m, ok := merged.(map[string]interface{})
+	caps, ok := merged["capabilities"]
 	require.True(t, ok)
-	caps, ok := m["capabilities"].(map[string]interface{})
-	require.True(t, ok)
-	require.Equal(t, true, caps["read"], "auth keys must survive the merge")
-	require.Contains(t, caps, "vector", "feature flags must survive the merge")
-	require.Contains(t, caps, "keyword")
-	require.Contains(t, caps, "wiki")
-	require.Contains(t, caps, "graph")
-	require.Contains(t, caps, "faq")
+	var capsMap map[string]bool
+	require.NoError(t, json.Unmarshal(caps, &capsMap))
+	require.Equal(t, true, capsMap["read"], "auth keys must survive the merge")
+	require.Contains(t, capsMap, "vector", "feature flags must survive the merge")
+	require.Contains(t, capsMap, "keyword")
+	require.Contains(t, capsMap, "wiki")
+	require.Contains(t, capsMap, "graph")
+	require.Contains(t, capsMap, "faq")
 }

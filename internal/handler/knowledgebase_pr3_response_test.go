@@ -134,19 +134,16 @@ func TestBuildKBResponse_StripsVectorStoreIDForSharedKB(t *testing.T) {
 		SummaryModelID:   "s",
 		VectorStoreID:    &storeID,
 	}
-	got := buildKBResponse(kb, types.SharedStoreDisplay(), nil)
-	m, ok := got.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected map result, got %T", got)
-	}
+	m := buildKBResponse(kb, types.SharedStoreDisplay(), kbResponseExtras{})
 	if _, exists := m["vector_store_id"]; exists {
-		t.Fatalf("shared KB response must not expose vector_store_id, got %v", m["vector_store_id"])
+		t.Fatalf("shared KB response must not expose vector_store_id, got %s", m["vector_store_id"])
 	}
 	if _, exists := m["vector_store_name"]; exists {
-		t.Fatalf("shared KB response must not expose vector_store_name, got %v", m["vector_store_name"])
+		t.Fatalf("shared KB response must not expose vector_store_name, got %s", m["vector_store_name"])
 	}
-	if m["vector_store_source"] != types.StoreSourceShared {
-		t.Fatalf("expected vector_store_source=shared, got %v", m["vector_store_source"])
+	var source string
+	if err := json.Unmarshal(m["vector_store_source"], &source); err != nil || source != types.StoreSourceShared {
+		t.Fatalf("expected vector_store_source=shared, got %s (err %v)", m["vector_store_source"], err)
 	}
 	// Defensive: ensure the source UUID does not appear *anywhere* in
 	// the serialized output (paranoid check against future map keys).
@@ -174,16 +171,13 @@ func TestBuildKBResponse_KeepsVectorStoreIDForOwnerKB(t *testing.T) {
 		EngineType: "elasticsearch",
 		Status:     "available",
 	}
-	got := buildKBResponse(kb, view, nil)
-	m, ok := got.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected map result, got %T", got)
+	m := buildKBResponse(kb, view, kbResponseExtras{})
+	var gotID, gotName string
+	if err := json.Unmarshal(m["vector_store_id"], &gotID); err != nil || gotID != storeID {
+		t.Fatalf("owner KB must keep vector_store_id, got %s (err %v)", m["vector_store_id"], err)
 	}
-	if m["vector_store_id"] != storeID {
-		t.Fatalf("owner KB must keep vector_store_id, got %v", m["vector_store_id"])
-	}
-	if m["vector_store_name"] != "prod-es" {
-		t.Fatalf("owner KB must surface store name, got %v", m["vector_store_name"])
+	if err := json.Unmarshal(m["vector_store_name"], &gotName); err != nil || gotName != "prod-es" {
+		t.Fatalf("owner KB must surface store name, got %s (err %v)", m["vector_store_name"], err)
 	}
 }
 

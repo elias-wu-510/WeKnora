@@ -1372,7 +1372,7 @@ func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 		if info.KnowledgeBase != nil && !apiKeyMaySeeKB(ctx, info.KnowledgeBase.ID) {
 			continue
 		}
-		rows = append(rows, sharedKBRow(info, nil))
+		rows = append(rows, sharedKBRow(info, sharedKBRowExtras{}))
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1752,9 +1752,9 @@ func (h *OrganizationHandler) ListOrganizationSharedKnowledgeBases(c *gin.Contex
 		if item.KnowledgeBase != nil && !apiKeyMaySeeKB(ctx, item.KnowledgeBase.ID) {
 			continue
 		}
-		extras := map[string]interface{}{"is_mine": item.IsMine}
+		extras := sharedKBRowExtras{IsMine: &item.IsMine}
 		if item.SourceFromAgent != nil {
-			extras["source_from_agent"] = item.SourceFromAgent
+			extras.SourceFromAgent = item.SourceFromAgent
 		}
 		rows = append(rows, sharedKBRow(&item.SharedKnowledgeBaseInfo, extras))
 	}
