@@ -1,15 +1,26 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"sort"
 	"strings"
 
+	"golang.org/x/sync/errgroup"
+
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
+
+// maxKBConcurrency caps how many knowledge bases are queried at once. Rerank
+// calls are the dominant cost, so the wall-clock time is roughly
+// ceil(KBs/limit) model round-trips instead of one per KB. Four keeps the
+// fan-out useful for a personal workspace while staying a small multiple of
+// the per-tenant rerank capacity.
+const maxKBConcurrency = 4
 
 // kbSearchRequest is the body of the workspace-wide retrieval endpoint used by
 // the C-Knowledge search page. knowledge_base_ids is optional: when omitted
@@ -67,8 +78,7 @@ func (h *KnowledgeBaseHandler) SearchVisibleKnowledge(c *gin.Context) {
 		}
 	}
 
-	hits := make([]kbSearchHit, 0, req.TopK)
-	searched := 0
+	targets := make([]*types.KnowledgeBase, 0, len(visible))
 	for _, kb := range visible {
 		if kb == nil || kb.ID == "" {
 			continue
@@ -78,49 +88,45 @@ func (h *KnowledgeBaseHandler) SearchVisibleKnowledge(c *gin.Context) {
 				continue
 			}
 		}
-		searched++
-		perKB := perKBMatches(req.TopK)
-		params := types.SearchParams{
-			QueryText:  query,
-			MatchCount: perKB,
-			// Rerank gives a calibrated relevance score, which is what lets the
-			// page say "没有找到" instead of returning weak vector neighbours.
-			Rerank: &types.RerankOptions{TopK: perKB},
-		}
-		var results []*types.SearchResult
-		retrieval, rerankErr := h.service.HybridSearchWithRerank(ctx, kb.ID, params)
-		if rerankErr == nil && retrieval != nil {
-			results = retrieval.Results
-		} else {
-			if rerankErr != nil {
-				logger.Warnf(ctx, "[kb-search] rerank failed for kb %s, fallback to raw recall: %v", kb.ID, rerankErr)
-			}
-			results, rerankErr = h.service.HybridSearch(ctx, kb.ID, types.SearchParams{
-				QueryText:  query,
-				MatchCount: perKB,
-			})
-		}
-		if rerankErr != nil {
-			// A KB without a usable index must not fail the whole search.
-			logger.Warnf(ctx, "[kb-search] skip kb %s: %v", kb.ID, rerankErr)
-			continue
-		}
-		for _, hit := range results {
-			if hit == nil {
-				continue
-			}
-			hits = append(hits, kbSearchHit{
-				KnowledgeBaseID:    kb.ID,
-				KnowledgeBaseName:  kb.Name,
-				KnowledgeID:        hit.KnowledgeID,
-				KnowledgeTitle:     hit.KnowledgeTitle,
-				Content:            snippet(hit.Content, 600),
-				Score:              hit.Score,
-				MatchType:          matchTypeLabel(hit.MatchType),
-				ChunkIndex:         hit.ChunkIndex,
-				KnowledgeBaseScope: kb.NormalizedScope(),
-			})
-		}
+		targets = append(targets, kb)
+	}
+	searched := len(targets)
+
+	perKB := perKBMatches(req.TopK)
+	perKBHits := make([][]kbSearchHit, len(targets))
+
+	// errgroup is used purely as a bounded worker pool: each task contains its
+	// own failure (logged, then skipped) and returns nil, so one unindexed KB
+	// can never cancel the siblings that are still searching.
+	limit := len(targets)
+	if limit > maxKBConcurrency {
+		limit = maxKBConcurrency
+	}
+	var group errgroup.Group
+	if limit > 0 {
+		group.SetLimit(limit)
+	}
+	for i, kb := range targets {
+		group.Go(func() error {
+			defer func() {
+				if r := recover(); r != nil {
+					// gin.Recovery only covers the request goroutine; without this
+					// recover a panic in one KB's backend would kill the process
+					// instead of just dropping that KB's rows.
+					logger.Errorf(ctx, "[kb-search] kb %s panicked, skipping: %v", kb.ID, r)
+				}
+			}()
+			// Each goroutine owns exactly one slot, so the merge below follows the
+			// visible-KB order no matter which search finishes first.
+			perKBHits[i] = searchKnowledgeBase(ctx, h.service, kb, query, perKB)
+			return nil
+		})
+	}
+	_ = group.Wait()
+
+	hits := make([]kbSearchHit, 0, req.TopK)
+	for _, kbHits := range perKBHits {
+		hits = append(hits, kbHits...)
 	}
 
 	// Keep only hits that share at least one query token with the passage.
@@ -138,7 +144,19 @@ func (h *KnowledgeBaseHandler) SearchVisibleKnowledge(c *gin.Context) {
 		hits = kept
 	}
 
-	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	// Total order, not just by score: KBs now finish in arbitrary order, so the
+	// pre-sort order is nondeterministic. The dedupe below keeps the first row
+	// of each document, which means ties would otherwise decide *which chunk*
+	// is returned. (Score, KnowledgeID, ChunkIndex) makes that choice stable.
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].Score != hits[j].Score {
+			return hits[i].Score > hits[j].Score
+		}
+		if hits[i].KnowledgeID != hits[j].KnowledgeID {
+			return hits[i].KnowledgeID < hits[j].KnowledgeID
+		}
+		return hits[i].ChunkIndex < hits[j].ChunkIndex
+	})
 
 	// One row per document: the page is a result list, not a chunk dump.
 	seen := make(map[string]struct{}, len(hits))
@@ -163,6 +181,63 @@ func (h *KnowledgeBaseHandler) SearchVisibleKnowledge(c *gin.Context) {
 			"searched_kb_count": searched,
 		},
 	})
+}
+
+// searchKnowledgeBase runs the rerank-then-recall query for one knowledge base
+// and maps the results onto the search page's row shape. A KB-level failure is
+// logged and yields nil so the caller can skip that KB without failing the
+// search.
+func searchKnowledgeBase(
+	ctx context.Context,
+	svc interfaces.KnowledgeBaseService,
+	kb *types.KnowledgeBase,
+	query string,
+	perKB int,
+) []kbSearchHit {
+	params := types.SearchParams{
+		QueryText:  query,
+		MatchCount: perKB,
+		// Rerank gives a calibrated relevance score, which is what lets the
+		// page say "没有找到" instead of returning weak vector neighbours.
+		Rerank: &types.RerankOptions{TopK: perKB},
+	}
+	var results []*types.SearchResult
+	retrieval, rerankErr := svc.HybridSearchWithRerank(ctx, kb.ID, params)
+	if rerankErr == nil && retrieval != nil {
+		results = retrieval.Results
+	} else {
+		if rerankErr != nil {
+			logger.Warnf(ctx, "[kb-search] rerank failed for kb %s, fallback to raw recall: %v", kb.ID, rerankErr)
+		}
+		results, rerankErr = svc.HybridSearch(ctx, kb.ID, types.SearchParams{
+			QueryText:  query,
+			MatchCount: perKB,
+		})
+	}
+	if rerankErr != nil {
+		// A KB without a usable index must not fail the whole search.
+		logger.Warnf(ctx, "[kb-search] skip kb %s: %v", kb.ID, rerankErr)
+		return nil
+	}
+
+	out := make([]kbSearchHit, 0, len(results))
+	for _, hit := range results {
+		if hit == nil {
+			continue
+		}
+		out = append(out, kbSearchHit{
+			KnowledgeBaseID:    kb.ID,
+			KnowledgeBaseName:  kb.Name,
+			KnowledgeID:        hit.KnowledgeID,
+			KnowledgeTitle:     hit.KnowledgeTitle,
+			Content:            snippet(hit.Content, 600),
+			Score:              hit.Score,
+			MatchType:          matchTypeLabel(hit.MatchType),
+			ChunkIndex:         hit.ChunkIndex,
+			KnowledgeBaseScope: kb.NormalizedScope(),
+		})
+	}
+	return out
 }
 
 func perKBMatches(topK int) int {
