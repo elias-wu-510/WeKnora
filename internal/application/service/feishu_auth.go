@@ -25,9 +25,6 @@ const (
 	feishuUserInfoEndpoint = "https://open.feishu.cn/open-apis/authen/v1/user_info"
 	// feishuDefaultEmailDomain is used when Feishu does not return an email.
 	feishuDefaultEmailDomain = "dsh.c-smart.hk"
-	// feishuDefaultSharedTenantID mirrors config's fallback so a hand-built
-	// FeishuAuthConfig (tests, embedded callers) still behaves predictably.
-	feishuDefaultSharedTenantID uint64 = 10000
 )
 
 var (
@@ -84,7 +81,9 @@ func (s *userService) getFeishuAuthConfig() (*config.FeishuAuthConfig, error) {
 	}
 	cfg := *s.config.FeishuAuth
 	if cfg.SharedTenantID == 0 {
-		cfg.SharedTenantID = feishuDefaultSharedTenantID
+		// Single source of truth: config owns both the env override and the
+		// historical 10000 fallback.
+		cfg.SharedTenantID = config.DefaultSharedTenantID()
 	}
 	if strings.TrimSpace(cfg.DefaultRole) == "" {
 		cfg.DefaultRole = string(types.TenantRoleViewer)

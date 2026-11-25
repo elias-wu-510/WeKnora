@@ -858,17 +858,21 @@ func applyFeishuAuthOverrides(cfg *Config) {
 		cfg.FeishuAuth.TenantKey = value
 	}
 	if cfg.FeishuAuth.SharedTenantID == 0 {
-		cfg.FeishuAuth.SharedTenantID = defaultSharedTenantID()
+		cfg.FeishuAuth.SharedTenantID = DefaultSharedTenantID()
 	}
 	if strings.TrimSpace(cfg.FeishuAuth.DefaultRole) == "" {
 		cfg.FeishuAuth.DefaultRole = string(types.TenantRoleViewer)
 	}
 }
 
-// defaultSharedTenantID resolves the workspace shared by all C-Knowledge
+// DefaultSharedTenantID resolves the workspace shared by all C-Knowledge
 // Feishu identities. Deployments set WEKNORA_SHARED_TENANT_ID; 10000 is the
 // historical production/test value and keeps existing installs working.
-func defaultSharedTenantID() uint64 {
+//
+// It is exported because the Feishu login service also serves hand-built
+// configs (tests, embedded callers) that never pass through LoadConfig, and
+// must apply the same fallback instead of redeclaring the constant.
+func DefaultSharedTenantID() uint64 {
 	const fallback uint64 = 10000
 	raw := strings.TrimSpace(os.Getenv("WEKNORA_SHARED_TENANT_ID"))
 	if raw == "" {
