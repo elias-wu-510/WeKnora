@@ -69,11 +69,11 @@ func (r KBRole) OrgMemberRole() types.OrgMemberRole {
 // ShareRole is only set for a KB reached through an organization share, and
 // IsKBOwner is true for the KB creator/owner.
 type KBRoleSources struct {
-	// Scope is the KB visibility scope (public/project/personal). Project KBs
+	// Scope is the KB visibility scope (tenant/project/personal). Project KBs
 	// are governed by their authorization table: a workspace contributor who
 	// is only a kb_members viewer must stay read-only there, while workspace
-	// admins keep oversight. Public KBs keep the historical workspace-role
-	// baseline (contributors may upload to any public KB).
+	// admins keep oversight. Tenant-scoped KBs keep the historical workspace-role
+	// baseline (contributors may upload to any tenant-wide KB).
 	Scope              string
 	TenantRole         types.TenantRole
 	KBMemberRole       types.KBMemberRole

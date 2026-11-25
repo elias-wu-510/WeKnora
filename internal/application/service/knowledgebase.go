@@ -147,20 +147,20 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 			kb.OwnerUserID = uid
 		}
 	}
-	switch kb.Scope {
-	case "":
-		kb.Scope = types.KBScopePublic
-	case types.KBScopePublic, types.KBScopeProject, types.KBScopePersonal:
-	default:
-		return nil, apperrors.NewBadRequestError("scope must be public, project or personal")
+	// Accept the canonical scopes plus the legacy "public" spelling of
+	// tenant (see types.NormalizeScopeInput) and persist only canonical values.
+	scope, ok := types.NormalizeScopeInput(kb.Scope)
+	if !ok {
+		return nil, apperrors.NewBadRequestError("scope must be tenant, project or personal")
 	}
+	kb.Scope = scope
 	caller := types.CallerFromContext(ctx)
-	if kb.Scope == types.KBScopePublic && caller.Role != types.TenantRoleAdmin && caller.Role != types.TenantRoleOwner {
+	if kb.Scope == types.KBScopeTenant && caller.Role != types.TenantRoleAdmin && caller.Role != types.TenantRoleOwner {
 		// Contributors may create personal or project KBs; publishing a KB to
 		// the whole workspace stays an admin decision.
-		return nil, apperrors.NewForbiddenError("only workspace admins can create public knowledge bases")
+		return nil, apperrors.NewForbiddenError("only workspace admins can create tenant-wide knowledge bases")
 	}
-	if kb.Scope != types.KBScopePublic {
+	if kb.Scope != types.KBScopeTenant {
 		kb.OwnerUserID = kb.CreatorID
 	}
 	kb.EnsureDefaults()

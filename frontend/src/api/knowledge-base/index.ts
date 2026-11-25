@@ -237,8 +237,9 @@ export function createKnowledgeBase(data: {
   name: string;
   description?: string;
   // 可见范围：公开（全空间）/ 项目（仅授权成员）/ 私密（仅自己）。
-  // 省略时后端按 public 处理；contributor 创建 public 会得到 403。
-  scope?: 'public' | 'project' | 'personal';
+  // 省略时后端按 tenant 处理；contributor 创建 tenant 会得到 403。
+  // 后端仍接受旧值 'public' 并归一化为 'tenant'，新客户端只发 'tenant'。
+  scope?: 'tenant' | 'project' | 'personal';
   type?: 'document' | 'faq';
   chunking_config?: any;
   image_processing_config?: ImageProcessingConfig;

@@ -38,27 +38,59 @@ const (
 // Knowledge-base visibility scopes. A KB belongs to one workspace (tenant) and
 // is additionally narrowed by its scope:
 //
-//	public   — every member of the workspace may read it
+//	tenant   — every member of the workspace may read it
 //	project  — only explicit kb_members (and the owner/creator) may read it
 //	personal — only the owner may read it
+//
+// "tenant" used to be spelled "public". The value never meant internet-public,
+// only tenant-wide, so migration 000117 renames it in the database and
+// legacyKBScopePublic remains accepted on input for older clients.
 const (
-	KBScopePublic   = "public"
+	KBScopeTenant   = "tenant"
 	KBScopeProject  = "project"
 	KBScopePersonal = "personal"
+
+	// legacyKBScopePublic is the pre-000117 spelling of KBScopeTenant. It is
+	// accepted from clients and pre-migration rows, never written back.
+	legacyKBScopePublic = "public"
 )
 
-// NormalizedScope returns the KB's effective scope. Empty or unknown values
-// are treated as public so rows written before migration 000116 keep their
-// previous workspace-wide visibility.
+// NormalizedScope returns the KB's canonical scope. Empty, legacy "public" and
+// unknown values are all treated as tenant so rows written before migration
+// 000117 (and unvalidated legacy rows) keep their previous tenant-wide
+// visibility. The returned value is always one of the KBScope* constants.
 func (kb *KnowledgeBase) NormalizedScope() string {
 	if kb == nil {
-		return KBScopePublic
+		return KBScopeTenant
 	}
-	switch kb.Scope {
-	case KBScopePersonal, KBScopeProject:
-		return kb.Scope
+	switch strings.ToLower(strings.TrimSpace(kb.Scope)) {
+	case KBScopeProject:
+		return KBScopeProject
+	case KBScopePersonal:
+		return KBScopePersonal
 	default:
-		return KBScopePublic
+		// "", "tenant", legacy "public", or anything unrecognized.
+		return KBScopeTenant
+	}
+}
+
+// NormalizeScopeInput maps a caller-supplied scope value to its canonical
+// form. It accepts the canonical values plus the legacy "public" spelling of
+// tenant (case-insensitive), so clients built before the rename keep working.
+// An empty value means "use the default", i.e. tenant.
+//
+// ok is false for any other value; create paths turn that into a 400 instead
+// of silently widening or narrowing visibility.
+func NormalizeScopeInput(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", KBScopeTenant, legacyKBScopePublic:
+		return KBScopeTenant, true
+	case KBScopeProject:
+		return KBScopeProject, true
+	case KBScopePersonal:
+		return KBScopePersonal, true
+	default:
+		return "", false
 	}
 }
 
@@ -123,10 +155,10 @@ type KnowledgeBase struct {
 	Description string `yaml:"description"             json:"description"`
 	// Workspace ID
 	TenantID uint64 `yaml:"tenant_id"               json:"tenant_id"`
-	// Scope narrows visibility inside the workspace: public / project / personal
-	// (see the KBScope* constants). Rows written before migration 000116 read
-	// as public.
-	Scope string `yaml:"scope"                   json:"scope"                   gorm:"type:varchar(16);default:'public';index"`
+	// Scope narrows visibility inside the workspace: tenant / project / personal
+	// (see the KBScope* constants). Rows written before migration 000117 stored
+	// the legacy value "public" and still read as tenant.
+	Scope string `yaml:"scope"                   json:"scope"                   gorm:"type:varchar(16);default:'tenant';index"`
 	// OwnerUserID is the member this KB belongs to for personal/project scopes.
 	// Backfilled from CreatorID by migration 000116.
 	OwnerUserID string `yaml:"owner_user_id"           json:"owner_user_id"           gorm:"type:varchar(36);index"`
@@ -910,6 +942,10 @@ func (kb *KnowledgeBase) MarshalJSON() ([]byte, error) {
 	redacted.StorageConfig.SecretID = ""
 	redacted.StorageConfig.SecretKey = ""
 	redacted.VLMConfig.APIKey = ""
+	// Responses always publish the canonical scope, even for a row read before
+	// migration 000117 ran (legacy "public") or a value some old writer left
+	// behind. This is the single JSON choke point for every KB response path.
+	redacted.Scope = kb.NormalizedScope()
 	aux := struct {
 		*alias
 		Capabilities KBCapabilities `json:"capabilities"`

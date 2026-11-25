@@ -818,21 +818,22 @@ interface KB {
   creator_id?: string;
   // creator_name 由后端 list 接口回填，仅用于卡片右下角来源徽章的 tooltip。
   creator_name?: string;
-  // W3 可见范围：public / project / personal。老数据缺省按 public 处理。
-  scope?: 'public' | 'project' | 'personal';
+  // W3 可见范围：tenant / project / personal。老数据可能仍是 legacy 'public'，
+  // kbScopeKey 会把它归一化为 tenant（后端响应已统一输出 tenant）。
+  scope?: 'tenant' | 'project' | 'personal' | 'public';
   owner_user_id?: string;
 }
 
 // 卡片上的范围徽标：只占一个 feature-badge 的位置，不改动布局。
-const kbScopeKey = (scope?: string): 'public' | 'project' | 'personal' =>
-  scope === 'project' || scope === 'personal' ? scope : 'public';
-const KB_SCOPE_LABELS: Record<'public' | 'project' | 'personal', string> = {
-  public: '公开',
+const kbScopeKey = (scope?: string): 'tenant' | 'project' | 'personal' =>
+  scope === 'project' || scope === 'personal' ? scope : 'tenant';
+const KB_SCOPE_LABELS: Record<'tenant' | 'project' | 'personal', string> = {
+  tenant: '公开',
   project: '项目',
   personal: '私密',
 };
-const KB_SCOPE_TIPS: Record<'public' | 'project' | 'personal', string> = {
-  public: '公开：全空间成员可见',
+const KB_SCOPE_TIPS: Record<'tenant' | 'project' | 'personal', string> = {
+  tenant: '公开：全空间成员可见',
   project: '项目：仅被授权的成员可见',
   personal: '私密：仅自己可见',
 };
