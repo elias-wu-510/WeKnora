@@ -248,6 +248,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
 		return nil, nil, err
 	}
+	// 客户端可自带 knowledge_base_ids；JWT 调用者按可见集过滤，避免猜 ID 检索私密库。
+	kbIDs = h.filterVisibleKnowledgeBaseIDs(ctx, kbIDs)
 
 	// The built-in wiki fixer is invoked from a KB page, not from a tenant's
 	// regular agent picker. When the KB is shared, run it in the source tenant

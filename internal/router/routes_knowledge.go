@@ -216,6 +216,11 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 	// 的 key 建出的新 KB 落在其 allow-list 之外（同租户、无越权，只是建完自己管不到），
 	// 空 allow-list 的 key 则是全租户 KB 管理、新建天然在范围内。KB 内容写入（文档/
 	// 分块/FAQ/Tag/Wiki）由对应子路由的 ingest 能力控制，不在本组。
+	// 工作区级检索：跨调用者可见的知识库做一次混合检索，供 C-Knowledge 检索页使用。
+	// 可见集在 handler 内用 ListKnowledgeBases 解析，与列表页同一套过滤。
+	g.apiKeyRoute(r, http.MethodPost, "/knowledge-search/visible",
+		apiKeyRetrieve(apiKeyFullAccess()), g.Viewer(), handler.SearchVisibleKnowledge)
+
 	kbgrp := r.Group("/knowledge-bases")
 	kb := g.apiKeyGroup(kbgrp, apiKeyRetrieve(apiKeyFullAccess()))
 	kbManagement := kb.With(apiKeyManageKnowledgeBases(apiKeyFullAccess()))

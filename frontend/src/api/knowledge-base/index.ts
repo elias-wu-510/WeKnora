@@ -899,3 +899,35 @@ export function batchReparseKnowledge(kbId: string, ids: string[], processConfig
     process_config: processConfig,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Workspace-wide retrieval (W4 search page)
+// ---------------------------------------------------------------------------
+
+export interface KnowledgeSearchHit {
+  knowledge_base_id: string
+  knowledge_base_name: string
+  knowledge_id: string
+  knowledge_title: string
+  content: string
+  score: number
+  match_type: string
+  chunk_index: number
+  knowledge_base_scope?: 'tenant' | 'project' | 'personal' | string
+}
+
+export interface KnowledgeSearchPayload {
+  query_text: string
+  knowledge_base_ids?: string[]
+  top_k?: number
+}
+
+export interface KnowledgeSearchResult {
+  query: string
+  results: KnowledgeSearchHit[]
+  searched_kb_count: number
+}
+
+export function searchKnowledgeAcrossBases(payload: KnowledgeSearchPayload) {
+  return post('/api/v1/knowledge-search/visible', payload)
+}

@@ -142,14 +142,10 @@ const router = createRouter({
         },
         {
           path: "knowledge-search",
-          // 旧路径保留为重定向，打开全局命令面板（⌘K），带上可选的 q 参数
-          redirect: (to) => {
-            const q = to.query.q
-            return {
-              path: '/platform/knowledge-bases',
-              query: typeof q === 'string' ? { cmdk: q } : { cmdk: '' },
-            }
-          },
+          name: "knowledgeSearch",
+          // C-Knowledge 渲染检索页；官方控制台仍重定向到全局命令面板（⌘K）。
+          component: () => import("../views/search/KnowledgeSearchEntry.vue"),
+          meta: { requiresInit: true, requiresAuth: true }
         },
         {
           path: "artifacts",

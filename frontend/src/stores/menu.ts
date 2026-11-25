@@ -41,6 +41,12 @@ export const useMenuStore = defineStore('menuStore', () => {
     { title: '', titleKey: 'menu.logout', icon: 'logout', path: 'logout' }
   ])
 
+  // C-Knowledge 的产品主线是「查资料」：在知识库之后补一个检索入口。
+  // 官方控制台不插入，避免改变上游信息架构。
+  if (isCKnowledgeConsole()) {
+    menuArr.splice(2, 0, { title: '检索', icon: 'search', path: 'knowledge-search' })
+  }
+
   const isFirstSession = ref(false)
   const firstQuery = ref('')
   const firstMentionedItems = ref<any[]>([])
