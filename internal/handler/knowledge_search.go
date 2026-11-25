@@ -133,16 +133,23 @@ func (h *KnowledgeBaseHandler) SearchVisibleKnowledge(c *gin.Context) {
 	// Fusion scores stay high on a single-domain corpus even for off-topic
 	// queries, so the score alone cannot answer "查不到就说没有"; token
 	// overlap is the cheap, deterministic relevance gate.
+	//
+	// A zero fusion score means neither the vector nor the keyword branch
+	// matched anything: such rows only surface through incidental token
+	// overlap (e.g. "such" inside an English passage) and must not be shown
+	// as an answer to the user.
 	tokens := queryTokens(query)
-	if len(tokens) > 0 {
-		kept := hits[:0]
-		for _, hit := range hits {
-			if containsAnyToken(hit.KnowledgeTitle+" "+hit.Content, tokens) {
-				kept = append(kept, hit)
-			}
+	kept := hits[:0]
+	for _, hit := range hits {
+		if hit.Score <= 0 {
+			continue
 		}
-		hits = kept
+		if len(tokens) > 0 && !containsAnyToken(hit.KnowledgeTitle+" "+hit.Content, tokens) {
+			continue
+		}
+		kept = append(kept, hit)
 	}
+	hits = kept
 
 	// Total order, not just by score: KBs now finish in arbitrary order, so the
 	// pre-sort order is nondeterministic. The dedupe below keeps the first row

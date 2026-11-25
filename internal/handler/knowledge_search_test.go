@@ -324,6 +324,20 @@ func TestSearchVisibleKnowledgeConcurrent(t *testing.T) {
 			wantSearch: 1,
 			wantChunks: map[string]int{"doc-a": 2},
 		},
+		{
+			// "zzzz-no-such-topic" style queries can still overlap a passage by
+			// accident (e.g. the word "such"). A zero fusion score proves no
+			// branch matched, so the row must be dropped rather than shown as a
+			// weak answer.
+			name: "zero-score rows are not presented as answers",
+			kbs:  []*types.KnowledgeBase{testKB("kb-a")},
+			topK: 20,
+			rerank: map[string][]*types.SearchResult{
+				"kb-a": {testHit("doc-a", 0, 0)},
+			},
+			wantIDs:    []string{},
+			wantSearch: 1,
+		},
 	}
 
 	for _, tc := range tests {
