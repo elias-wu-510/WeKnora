@@ -44,7 +44,7 @@
             <div v-if="editorMode === 'create'" class="form-item" data-guide="kb-create-scope">
               <label class="form-label required">可见范围</label>
               <t-radio-group v-model="formData.scope" data-guide="kb-create-scope-options">
-                <t-radio-button v-if="canCreatePublicKb" value="public">公开</t-radio-button>
+                <t-radio-button v-if="canCreatePublicKb" value="tenant">公开（全员可见）</t-radio-button>
                 <t-radio-button value="project">项目</t-radio-button>
                 <t-radio-button value="personal">私密</t-radio-button>
               </t-radio-group>
@@ -845,8 +845,8 @@ const isFAQ = computed(() => formData.value?.type === 'faq')
 // 只有空间 admin/owner 能创建公开库（后端同规则），其余角色只看到
 // 项目 / 私密，并默认项目。hasRole('admin') 已覆盖 owner。
 const canCreatePublicKb = computed(() => authStore.hasRole('admin'))
-const defaultKbScope = (): 'public' | 'project' | 'personal' =>
-  canCreatePublicKb.value ? 'public' : 'project'
+const defaultKbScope = (): 'tenant' | 'project' | 'personal' =>
+  canCreatePublicKb.value ? 'tenant' : 'project'
 const scopeHint = computed(() => {
   switch (formData.value?.scope) {
     case 'personal':
@@ -1053,7 +1053,10 @@ const loadKBData = async (
     const kbType = (kb.type as 'document' | 'faq') || 'document'
     formData.value = {
       type: kbType,
-      scope: ((kb as any).scope || 'public') as 'public' | 'project' | 'personal',
+      // 响应已是 tenant；兼容旧后端/缓存里可能出现的 legacy 'public'。
+      scope: ((kb as any).scope === 'public'
+        ? 'tenant'
+        : (kb as any).scope || 'tenant') as 'tenant' | 'project' | 'personal',
       name: kb.name || '',
       description: kb.description || '',
       faqConfig: {

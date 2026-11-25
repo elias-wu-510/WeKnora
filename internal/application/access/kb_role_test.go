@@ -82,9 +82,9 @@ func TestResolveEffectiveKBRole(t *testing.T) {
 			want: KBRoleViewer,
 		},
 		{
-			name: "public scope keeps workspace contributor baseline",
+			name: "tenant scope keeps workspace contributor baseline",
 			sources: KBRoleSources{
-				Scope:      string(types.KBScopePublic),
+				Scope:      string(types.KBScopeTenant),
 				TenantRole: types.TenantRoleContributor,
 			},
 			want: KBRoleContributor,
